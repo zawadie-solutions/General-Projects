@@ -93,6 +93,6 @@ export const BADGES: Record<string, BadgeDef> = {
   'prompt-master': {
     id: 'prompt-master',
     name: 'Prompt Master',
-    description: 'Completed every level of PromptCraft.',
+    description: 'Completed every level of PromtKit.',
   },
 }
