@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -10,6 +11,8 @@ import type { LevelId } from '../data/types'
 import { LEVELS } from '../data/levels'
 import { rankForPoints } from '../lib/rank'
 import { todayKey } from '../lib/date'
+import { useAuth } from './auth'
+import { api as backendApi, type RemoteProgress } from '../lib/api'
 
 const STORAGE_KEY = 'pe-progress-v1'
 
@@ -53,12 +56,69 @@ interface ProgressApi extends ProgressState {
 
 const ProgressContext = createContext<ProgressApi | null>(null)
 
+function isEmptyRemote(p: RemoteProgress) {
+  return (
+    p.points === 0 &&
+    p.streak === 0 &&
+    p.lastActiveDate === null &&
+    Object.keys(p.completedExercises).length === 0 &&
+    Object.keys(p.quizPassed).length === 0 &&
+    p.badges.length === 0
+  )
+}
+
 export function ProgressProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
   const [state, setState] = useState<ProgressState>(loadState)
+  const stateRef = useRef(state)
+  const hydratedForUserId = useRef<number | null>(null)
+
+  useEffect(() => {
+    stateRef.current = state
+  }, [state])
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   }, [state])
+
+  // On sign-in, adopt real progress from the database (cross-device
+  // restore). If the account is brand new, push local progress up instead
+  // of overwriting it with empty defaults.
+  useEffect(() => {
+    if (!user) {
+      hydratedForUserId.current = null
+      return
+    }
+    if (hydratedForUserId.current === user.id) return
+    hydratedForUserId.current = user.id
+
+    backendApi
+      .me()
+      .then((res) => {
+        if (res.progress && !isEmptyRemote(res.progress)) {
+          setState({
+            points: res.progress.points,
+            streak: res.progress.streak,
+            lastActiveDate: res.progress.lastActiveDate,
+            completedExercises: res.progress.completedExercises,
+            quizPassed: res.progress.quizPassed as Partial<Record<LevelId, boolean>>,
+            badges: res.progress.badges,
+          })
+        } else {
+          backendApi.saveProgress(stateRef.current).catch(() => {})
+        }
+      })
+      .catch(() => {})
+  }, [user])
+
+  // Push local changes up to the database whenever signed in.
+  useEffect(() => {
+    if (!user) return
+    const timer = setTimeout(() => {
+      backendApi.saveProgress(state).catch(() => {})
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [user, state])
 
   useEffect(() => {
     const today = todayKey()

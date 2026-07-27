@@ -188,7 +188,7 @@ export function LevelDetail({ level, content, badgeIds, nextLevel }: Props) {
       {quizDone && !nextLevel && (
         <Card className="mt-6 flex flex-col items-center gap-2 bg-gradient-to-br from-accent-soft/60 to-transparent py-10 text-center">
           <Award className="h-8 w-8 text-accent" />
-          <h3 className="text-xl font-extrabold text-heading">You've completed PromptCraft!</h3>
+          <h3 className="text-xl font-extrabold text-heading">You've completed PromtKit!</h3>
           <p className="max-w-sm text-sm text-text-soft">
             You've worked through all 5 levels and earned the Prompt Master badge. Check your
             Dashboard to see everything you've unlocked.
