@@ -1,6 +1,6 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getSql } from './db'
+import { getSql } from './db.js'
 
 const SESSION_COOKIE = 'pe_session'
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days

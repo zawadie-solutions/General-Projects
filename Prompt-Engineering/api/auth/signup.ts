@@ -1,12 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getSql } from '../_lib/db'
+import { getSql } from '../_lib/db.js'
 import {
   hashPassword,
   createSession,
   setSessionCookie,
   isAllowedEmail,
   ALLOWED_EMAIL_DOMAIN,
-} from '../_lib/auth'
+} from '../_lib/auth.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 

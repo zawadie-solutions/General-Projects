@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { getSql } from './_lib/db'
-import { getUserFromRequest } from './_lib/auth'
+import { getSql } from './_lib/db.js'
+import { getUserFromRequest } from './_lib/auth.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await getUserFromRequest(req)
