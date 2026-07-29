@@ -32,38 +32,40 @@
   --radius-pill: 100px;
 }
 
-:root {
-  color-scheme: light;
-}
+@layer base {
+  :root {
+    color-scheme: light;
+  }
 
-body {
-  margin: 0;
-  background: var(--color-bg);
-  color: var(--color-text);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 
-h1, h2, h3, h4 {
-  color: var(--color-heading);
-  font-family: var(--font-display);
-  font-weight: 700;
-}
+  h1, h2, h3, h4 {
+    color: var(--color-heading);
+    font-family: var(--font-display);
+    font-weight: 700;
+  }
 
-a {
-  color: var(--color-accent);
-}
-a:hover {
-  color: var(--color-accent-hover);
-}
+  a {
+    color: var(--color-accent);
+  }
+  a:hover {
+    color: var(--color-accent-hover);
+  }
 
-textarea:focus, input:focus {
-  outline: 2px solid var(--color-success);
-  outline-offset: 1px;
-}
+  textarea:focus, input:focus {
+    outline: 2px solid var(--color-success);
+    outline-offset: 1px;
+  }
 
-::selection {
-  background: var(--color-accent-soft);
-  color: var(--color-accent-hover);
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-hover);
+  }
 }

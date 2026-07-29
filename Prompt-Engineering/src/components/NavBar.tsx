@@ -5,7 +5,11 @@ import { useAuth } from '../store/auth'
 import { Logo, LogoMark } from './Logo'
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `text-sm font-bold transition-colors ${isActive ? 'text-text' : 'text-text-softer hover:text-text'}`
+  `border-b-2 pb-1 text-sm font-bold transition-colors ${
+    isActive
+      ? 'border-accent text-text'
+      : 'border-transparent text-text-softer hover:border-border-input hover:text-text'
+  }`
 
 export function NavBar() {
   const { points, streak } = useProgress()

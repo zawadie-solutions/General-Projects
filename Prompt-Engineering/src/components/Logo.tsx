@@ -1,21 +1,19 @@
+import logoSrc from '../images/Logo.png'
+
 interface LogoProps {
   size?: number
   className?: string
 }
 
-export function LogoMark({ size = 32, className }: LogoProps) {
+export function LogoMark({ size = 32, className = '' }: LogoProps) {
   return (
-    <svg
-      viewBox="0 0 100 100"
+    <img
+      src={logoSrc}
       width={size}
       height={size}
-      className={className}
-      aria-hidden="true"
-    >
-      <circle cx="25" cy="25" r="17" fill="#F2A93B" />
-      <polygon points="68,4 84,4 36,96 20,96" fill="#E31C5F" />
-      <rect x="56" y="58" width="40" height="38" rx="5" fill="#22A67A" />
-    </svg>
+      alt="Zawadie"
+      className={`shrink-0 object-contain ${className}`}
+    />
   )
 }
 

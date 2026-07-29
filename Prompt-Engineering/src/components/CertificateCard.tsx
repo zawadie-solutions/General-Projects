@@ -1,13 +1,23 @@
 import { Download } from 'lucide-react'
 import { LogoMark } from './Logo'
 import { Button } from './Button'
+import logoSrc from '../images/Logo.png'
 
 interface Props {
   name: string
   score: number
 }
 
-function drawAndDownload(name: string, score: number) {
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = reject
+    img.src = src
+  })
+}
+
+async function drawAndDownload(name: string, score: number) {
   const canvas = document.createElement('canvas')
   canvas.width = 1200
   canvas.height = 800
@@ -17,34 +27,11 @@ function drawAndDownload(name: string, score: number) {
   ctx.fillStyle = '#221D1A'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-  // logo mark
-  const ox = canvas.width / 2 - 30
-  const oy = 90
-  const scale = 0.6
-  ctx.save()
-  ctx.translate(ox, oy)
-  ctx.scale(scale, scale)
-  ctx.fillStyle = '#F2A93B'
-  ctx.beginPath()
-  ctx.arc(25, 25, 17, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = '#E31C5F'
-  ctx.beginPath()
-  ctx.moveTo(68, 4)
-  ctx.lineTo(84, 4)
-  ctx.lineTo(36, 96)
-  ctx.lineTo(20, 96)
-  ctx.closePath()
-  ctx.fill()
-  ctx.fillStyle = '#22A67A'
-  if (typeof ctx.roundRect === 'function') {
-    ctx.beginPath()
-    ctx.roundRect(56, 58, 40, 38, 5)
-    ctx.fill()
-  } else {
-    ctx.fillRect(56, 58, 40, 38)
+  const logo = await loadImage(logoSrc).catch(() => null)
+  if (logo) {
+    const size = 90
+    ctx.drawImage(logo, canvas.width / 2 - size / 2, 90, size, size)
   }
-  ctx.restore()
 
   ctx.textAlign = 'center'
   ctx.fillStyle = '#F2A93B'
