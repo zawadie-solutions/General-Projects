@@ -8,14 +8,14 @@ export function ProgressBar({
   const pct = Math.max(0, Math.min(100, value))
   return (
     <div
-      className={`h-2 w-full overflow-hidden rounded-full bg-accent-soft ${className}`}
+      className={`h-2 w-full overflow-hidden rounded-pill bg-track ${className}`}
       role="progressbar"
       aria-valuenow={pct}
       aria-valuemin={0}
       aria-valuemax={100}
     >
       <div
-        className="h-full rounded-full bg-accent transition-all duration-500 ease-out"
+        className="h-full rounded-pill bg-success transition-all duration-500 ease-out"
         style={{ width: `${pct}%` }}
       />
     </div>

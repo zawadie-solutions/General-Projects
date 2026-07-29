@@ -1,53 +1,98 @@
-import { Link, NavLink } from 'react-router-dom'
-import { Flame, Sparkles } from 'lucide-react'
+import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { Flame, LogOut } from 'lucide-react'
 import { useProgress } from '../store/progress'
+import { useAuth } from '../store/auth'
+import { Logo, LogoMark } from './Logo'
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `text-sm font-medium transition-colors ${
-    isActive ? 'text-accent' : 'text-text-soft hover:text-heading'
-  }`
+  `text-sm font-bold transition-colors ${isActive ? 'text-text' : 'text-text-softer hover:text-text'}`
 
 export function NavBar() {
-  const { points, rankName, streak } = useProgress()
+  const { points, streak } = useProgress()
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
+
+  async function handleSignOut() {
+    await signOut()
+    navigate('/')
+  }
+
+  if (!user) {
+    return (
+      <header>
+        <div className="mx-auto flex max-w-[1280px] items-center justify-between gap-3 px-6 py-5 sm:px-12">
+          <Link to="/">
+            <Logo />
+          </Link>
+          <div className="flex items-center gap-2.5">
+            <Link
+              to="/signin"
+              className="rounded-control px-4 py-2.5 text-sm font-bold text-text hover:text-accent"
+            >
+              Sign in
+            </Link>
+            <Link
+              to="/signup"
+              className="rounded-control bg-accent px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-accent-hover"
+            >
+              Create account
+            </Link>
+          </div>
+        </div>
+      </header>
+    )
+  }
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-surface/80 backdrop-blur">
-      <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-y-2 px-4 py-3 sm:px-6">
-        <Link to="/" className="flex items-center gap-2 font-extrabold text-heading">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white">
-            <Sparkles className="h-4 w-4" />
-          </span>
-          <span className="hidden sm:inline">PromptCraft</span>
-        </Link>
+    <header className="border-b border-border bg-surface">
+      <div className="mx-auto flex max-w-[1280px] items-center justify-between px-6 py-4 sm:px-12">
+        <div className="flex items-center gap-8">
+          <Link to="/dashboard" className="flex items-center gap-2.5">
+            <LogoMark size={28} />
+            <span className="font-display text-[17px] font-bold text-text">
+              Zawadie <span className="text-accent">PromptClass</span>
+            </span>
+          </Link>
+          <nav className="hidden gap-6 sm:flex">
+            <NavLink to="/dashboard" className={navLinkClass}>
+              Dashboard
+            </NavLink>
+            <NavLink to="/progress" className={navLinkClass}>
+              Progress
+            </NavLink>
+            <NavLink to="/evaluate" className={navLinkClass}>
+              Evaluate
+            </NavLink>
+            <NavLink to="/leaderboard" className={navLinkClass}>
+              Leaderboard
+            </NavLink>
+          </nav>
+        </div>
 
-        <div className="flex items-center gap-1.5 rounded-full border border-border bg-bg px-3 py-1.5 text-xs font-semibold text-text-soft sm:order-3">
-          <span className="flex items-center gap-1 text-warn">
+        <div className="flex items-center gap-3.5">
+          <span className="hidden items-center gap-1 text-xs font-bold text-warn sm:flex">
             <Flame className="h-3.5 w-3.5" />
             {streak}
           </span>
-          <span className="h-3 w-px bg-border" />
-          <span className="text-heading">{points} pts</span>
-          <span className="h-3 w-px bg-border" />
-          <span className="text-accent">{rankName}</span>
+          <span className="hidden text-xs font-bold text-text-soft sm:inline">{points} pts</span>
+          <span className="hidden text-sm text-text-soft md:inline">Hi, {user.displayName.split(' ')[0]}</span>
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-warn text-[13px] font-bold text-text">
+            {user.displayName
+              .split(' ')
+              .map((w) => w[0])
+              .slice(0, 2)
+              .join('')
+              .toUpperCase()}
+          </div>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            className="flex items-center gap-1 text-[13px] font-semibold text-text-softer hover:text-accent"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Log out</span>
+          </button>
         </div>
-
-        <nav className="order-4 flex w-full flex-wrap items-center justify-center gap-x-4 gap-y-1.5 border-t border-border pt-2 sm:order-2 sm:w-auto sm:justify-start sm:gap-x-5 sm:border-t-0 sm:pt-0">
-          <NavLink to="/levels" className={navLinkClass}>
-            Levels
-          </NavLink>
-          <NavLink to="/daily-challenge" className={navLinkClass}>
-            Daily Challenge
-          </NavLink>
-          <NavLink to="/prompt-battle" className={navLinkClass}>
-            Prompt Battle
-          </NavLink>
-          <NavLink to="/dashboard" className={navLinkClass}>
-            Dashboard
-          </NavLink>
-          <NavLink to="/leaderboard" className={navLinkClass}>
-            Leaderboard
-          </NavLink>
-        </nav>
       </div>
     </header>
   )

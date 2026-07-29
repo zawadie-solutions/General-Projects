@@ -1,17 +1,16 @@
-export type LevelId =
-  | 'foundation'
-  | 'core-skills'
-  | 'intermediate'
-  | 'advanced'
-  | 'mastery'
+export type ModuleId =
+  | 'foundations'
+  | 'instruction-context'
+  | 'reasoning-structure'
+  | 'formatting-output'
+  | 'tools-agents'
+  | 'evaluation-responsible'
 
-export interface LevelMeta {
-  id: LevelId
+export interface ModuleMeta {
+  id: ModuleId
   order: number
   title: string
-  tagline: string
-  description: string
-  built: boolean
+  blurb: string
 }
 
 export interface Criterion {
@@ -20,57 +19,70 @@ export interface Criterion {
   test: (text: string) => boolean
 }
 
-export interface MultipleChoiceExercise {
-  type: 'multiple-choice'
-  id: string
-  prompt: string
-  options: { id: string; text: string }[]
-  correctId: string
-  explanation: string
-  points: number
+export interface RtcroFramework {
+  role: string
+  task: string
+  context: string
+  rules: string
+  outputFormat: string
 }
 
-export interface FreeTextExercise {
-  type: 'fix-it' | 'write-it'
-  id: string
+export interface Challenge {
   prompt: string
-  weakPrompt?: string
   placeholder: string
   criteria: Criterion[]
+  sampleOutput: string
   modelAnswer: string
   modelAnswerNote: string
 }
 
-export interface SpotProblemExercise {
-  type: 'spot-problem'
+export interface Lesson {
   id: string
-  prompt: string
-  output: string
-  options: { id: string; text: string }[]
-  correctId: string
-  explanation: string
-  points: number
+  title: string
+  teach: string[]
+  before: string
+  after: string
+  framework?: RtcroFramework
+  challenge: Challenge
 }
 
-export type Exercise =
-  | MultipleChoiceExercise
-  | FreeTextExercise
-  | SpotProblemExercise
+export interface ResponseOption {
+  id: string
+  label: string
+  text: string
+  scores: {
+    accuracy: number
+    completeness: number
+    helpfulness: number
+    truthfulness: number
+    safety: number
+    formatting: number
+    hallucinationFree: number
+  }
+}
+
+export interface ResponseComparisonLesson {
+  id: string
+  title: string
+  teach: string[]
+  promptShown: string
+  metrics: { key: keyof ResponseOption['scores']; label: string; description: string }[]
+  responses: ResponseOption[]
+  bestResponseId: string
+  explanation: string
+}
+
+export interface ModuleContent {
+  id: ModuleId
+  lessons: Lesson[]
+  comparisonLesson?: ResponseComparisonLesson
+}
 
 export interface QuizQuestion {
   id: string
+  moduleId: ModuleId
   question: string
   options: { id: string; text: string }[]
   correctId: string
   explanation: string
-}
-
-export interface LevelContent {
-  id: LevelId
-  lessonTitle: string
-  lessonParagraphs: string[]
-  examples: { label: string; weak: string; strong: string; note: string }[]
-  exercises: Exercise[]
-  quiz: QuizQuestion[]
-  quizPassCount: number
 }

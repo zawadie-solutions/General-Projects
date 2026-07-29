@@ -5,94 +5,54 @@ export interface BadgeDef {
 }
 
 export const BADGES: Record<string, BadgeDef> = {
-  'clear-instructions': {
-    id: 'clear-instructions',
-    name: 'Clear Instructions',
-    description: 'Rewrote a vague prompt into a clear, specific one.',
+  'foundations-graduate': {
+    id: 'foundations-graduate',
+    name: 'Foundations Graduate',
+    description: 'Completed every lesson in Prompt Engineering Foundations.',
   },
-  'great-with-examples': {
-    id: 'great-with-examples',
-    name: 'Great with Examples',
-    description: 'Wrote a prompt packed with useful context and detail.',
+  'rtcro-master': {
+    id: 'rtcro-master',
+    name: 'RTCRO Master',
+    description: 'Rewrote a poor prompt into a professional one using the RTCRO framework.',
   },
-  'sharp-eye': {
-    id: 'sharp-eye',
-    name: 'Sharp Eye',
-    description: 'Spotted exactly why a prompt led to a bad answer.',
+  'instruction-context-graduate': {
+    id: 'instruction-context-graduate',
+    name: 'Context Architect',
+    description: 'Completed every lesson in Instruction & Context Design.',
   },
-  'foundation-graduate': {
-    id: 'foundation-graduate',
-    name: 'Foundation Graduate',
-    description: 'Completed every exercise and the quiz in Foundation.',
+  'reasoning-structure-graduate': {
+    id: 'reasoning-structure-graduate',
+    name: 'Reasoning Guide',
+    description: 'Completed every lesson in Reasoning & Structure.',
   },
-  'role-player': {
-    id: 'role-player',
-    name: 'Role Player',
-    description: 'Gave the AI a clear role to shape its tone and expertise.',
-  },
-  'format-pro': {
-    id: 'format-pro',
+  'formatting-output-graduate': {
+    id: 'formatting-output-graduate',
     name: 'Format Pro',
-    description: 'Set a clear format, tone, and example for the AI to match.',
+    description: 'Completed every lesson in Formatting & Output Control.',
   },
-  'core-skills-graduate': {
-    id: 'core-skills-graduate',
-    name: 'Core Skills Graduate',
-    description: 'Completed every exercise and the quiz in Core Skills.',
+  'tools-agents-graduate': {
+    id: 'tools-agents-graduate',
+    name: 'Workflow Builder',
+    description: 'Completed every lesson in Tools, Agents & Workflows.',
   },
-  'daily-devotee': {
-    id: 'daily-devotee',
-    name: 'Daily Devotee',
-    description: 'Completed 3 Daily Challenges.',
+  'evaluation-responsible-graduate': {
+    id: 'evaluation-responsible-graduate',
+    name: 'Quality Reviewer',
+    description: 'Completed every lesson in Evaluation & Responsible Use.',
   },
-  'battle-champion': {
-    id: 'battle-champion',
-    name: 'Battle Champion',
-    description: 'Correctly called the winner in 3 Prompt Battles.',
+  'response-scorer': {
+    id: 'response-scorer',
+    name: 'Response Scorer',
+    description: 'Correctly identified the strongest of five AI responses.',
   },
-  'context-setter': {
-    id: 'context-setter',
-    name: 'Context Setter',
-    description: 'Gave the AI context and ruled out what you didn\'t want.',
+  'prompt-evaluator': {
+    id: 'prompt-evaluator',
+    name: 'Prompt Evaluator',
+    description: 'Scored a prompt in the Prompt Evaluation tool.',
   },
-  'step-thinker': {
-    id: 'step-thinker',
-    name: 'Step Thinker',
-    description: 'Broke a task into clear, ordered steps.',
-  },
-  'intermediate-graduate': {
-    id: 'intermediate-graduate',
-    name: 'Intermediate Graduate',
-    description: 'Completed every exercise and the quiz in Intermediate.',
-  },
-  'combo-fixer': {
-    id: 'combo-fixer',
-    name: 'Combo Fixer',
-    description: 'Fixed a weak prompt by combining a role, format, and constraint.',
-  },
-  'multi-step-master': {
-    id: 'multi-step-master',
-    name: 'Multi-Step Master',
-    description: 'Structured a multi-stage task into one clean, ordered prompt.',
-  },
-  'advanced-graduate': {
-    id: 'advanced-graduate',
-    name: 'Advanced Graduate',
-    description: 'Completed every exercise and the quiz in Advanced.',
-  },
-  'quick-fixer': {
-    id: 'quick-fixer',
-    name: 'Quick Fixer',
-    description: 'Rebuilt a bare prompt using nearly every habit from the course.',
-  },
-  'prompt-architect': {
-    id: 'prompt-architect',
-    name: 'Prompt Architect',
-    description: 'Combined a role, context, format, and constraint in a single prompt.',
-  },
-  'prompt-master': {
-    id: 'prompt-master',
-    name: 'Prompt Master',
-    description: 'Completed every level of PromptCraft.',
+  certified: {
+    id: 'certified',
+    name: 'Zawadie PromptClass Certified',
+    description: 'Passed the final exam with a score of 80% or higher.',
   },
 }

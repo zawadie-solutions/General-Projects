@@ -1,25 +1,35 @@
 @import 'tailwindcss';
 
 @theme {
-  --font-sans: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Space Grotesk', 'IBM Plex Sans', sans-serif;
+  --font-sans: 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 
-  --color-bg: #fafafa;
+  --color-bg: #fbf8f2;
   --color-surface: #ffffff;
-  --color-border: #e7e5ea;
-  --color-text: #3f3b46;
-  --color-text-soft: #78737f;
-  --color-heading: #17151c;
+  --color-border: rgba(34, 29, 26, 0.08);
+  --color-border-input: rgba(34, 29, 26, 0.15);
+  --color-track: #f0ebe3;
+  --color-text: #221d1a;
+  --color-text-soft: #5c534c;
+  --color-text-softer: #8a8078;
+  --color-heading: #221d1a;
 
-  --color-accent: #8b3bff;
-  --color-accent-soft: #f2ebff;
-  --color-accent-hover: #7729e6;
+  --color-accent: #e31c5f;
+  --color-accent-soft: #fbeef3;
+  --color-accent-hover: #c11651;
 
-  --color-success: #16a34a;
-  --color-success-soft: #ecfdf3;
-  --color-warn: #d97706;
-  --color-warn-soft: #fef6e7;
-  --color-danger: #dc2626;
-  --color-danger-soft: #fef2f2;
+  --color-success: #22a67a;
+  --color-success-soft: #eef7f2;
+  --color-warn: #f2a93b;
+  --color-warn-soft: #fdf3e2;
+  --color-danger: #e31c5f;
+  --color-danger-soft: #fbeef3;
+
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 16px;
+  --radius-pill: 100px;
 }
 
 :root {
@@ -37,7 +47,20 @@ body {
 
 h1, h2, h3, h4 {
   color: var(--color-heading);
+  font-family: var(--font-display);
   font-weight: 700;
+}
+
+a {
+  color: var(--color-accent);
+}
+a:hover {
+  color: var(--color-accent-hover);
+}
+
+textarea:focus, input:focus {
+  outline: 2px solid var(--color-success);
+  outline-offset: 1px;
 }
 
 ::selection {
