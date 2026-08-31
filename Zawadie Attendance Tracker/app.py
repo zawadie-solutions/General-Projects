@@ -100,8 +100,10 @@ class LoginDialog(QDialog):
         form = QFormLayout()
         form.setSpacing(10)
         self.username = QLineEdit(self.db.get_setting("admin_username", DEFAULT_ADMIN_USERNAME))
+        self.username.setReadOnly(True)
         self.password = QLineEdit()
         self.password.setEchoMode(QLineEdit.Password)
+        self.password.setFocus()
         self.password.returnPressed.connect(self.try_login)
         form.addRow("Username", self.username)
         form.addRow("Password", self.password)
@@ -493,8 +495,13 @@ class ScannerPage(QWidget):
         self.status_detail.setObjectName("statusDetail")
         self.status_detail.setWordWrap(True)
         self.status_detail.setAlignment(Qt.AlignCenter)
+        self.dismiss_button = QPushButton("✓  Got it")
+        self.dismiss_button.setObjectName("secondaryButton")
+        self.dismiss_button.setVisible(False)
+        self.dismiss_button.clicked.connect(self.reset_status)
         sl.addWidget(self.status_title)
         sl.addWidget(self.status_detail)
+        sl.addWidget(self.dismiss_button)
         sl.addStretch()
 
         div2 = QFrame(); div2.setFrameShape(QFrame.HLine); div2.setObjectName("divider")
@@ -640,7 +647,7 @@ class ScannerPage(QWidget):
             self.status_title.setText("Not Recorded")
             self.status_detail.setText(result["message"])
             self._set_error()
-        QTimer.singleShot(3000, self.reset_status)
+        self.dismiss_button.setVisible(True)
 
     def reset_status(self) -> None:
         self.status_title.setText("Waiting...")
@@ -648,6 +655,7 @@ class ScannerPage(QWidget):
             "Camera active — hold QR code in view." if self.scanner
             else "Start the camera and scan a QR code."
         )
+        self.dismiss_button.setVisible(False)
         self._set_neutral()
 
     def show_error(self, message: str) -> None:
@@ -920,8 +928,6 @@ class SettingsPage(QWidget):
         cf = QFormLayout()
         cf.setSpacing(10)
         self.admin_username = QLineEdit(self.db.get_setting("admin_username", DEFAULT_ADMIN_USERNAME))
-        self.admin_username.setReadOnly(True)
-        self.admin_username.setToolTip("The admin username is fixed and cannot be changed.")
         self.admin_password = QLineEdit()
         self.admin_password.setEchoMode(QLineEdit.Password)
         self.admin_password.setPlaceholderText("Leave blank to keep the current password")
@@ -956,6 +962,7 @@ class SettingsPage(QWidget):
         layout.addStretch()
 
     def save(self, *, announce: bool = True) -> None:
+        self.db.set_setting("admin_username", self.admin_username.text().strip() or DEFAULT_ADMIN_USERNAME)
         new_password = self.admin_password.text()
         if new_password:
             self.db.set_admin_password(new_password)
