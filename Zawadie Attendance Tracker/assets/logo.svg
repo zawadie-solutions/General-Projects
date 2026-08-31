@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Teal base curve -->
+  <path d="M12 86 Q46 70 80 84 Q85 87 82 93 Q46 79 10 97 Q6 91 12 86Z" fill="#00897B"/>
+  <!-- Pink/magenta diagonal body -->
+  <path d="M47 10 Q59 10 62 21 L41 80 Q38 89 27 87 Q16 84 19 74 L40 15 Q43 10 47 10Z" fill="#D81B60"/>
+  <!-- Gold circle -->
+  <circle cx="30" cy="25" r="20" fill="#F5A623"/>
+</svg>
