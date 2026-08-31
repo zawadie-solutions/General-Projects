@@ -7,7 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from logging_config import get_logger
 from settings import DATABASE_PATH, DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME, ensure_directories
+
+log = get_logger("database")
 
 _PBKDF2_ITERATIONS = 260_000
 
@@ -63,17 +66,20 @@ class Database:
                 )
                 """
             )
+            self._migrate_attendance_sessions(conn)
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS attendance (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     attendance_date TEXT NOT NULL,
                     employee_id TEXT NOT NULL,
+                    session_number INTEGER NOT NULL DEFAULT 1,
                     sign_in TEXT,
                     sign_out TEXT,
+                    reentry_reason TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
-                    UNIQUE(attendance_date, employee_id),
+                    UNIQUE(attendance_date, employee_id, session_number),
                     FOREIGN KEY(employee_id) REFERENCES employees(employee_id)
                 )
                 """
@@ -95,6 +101,56 @@ class Database:
                 "INSERT OR IGNORE INTO app_settings(key, value) VALUES(?, ?)",
                 defaults.items(),
             )
+
+    @staticmethod
+    def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        return row is not None
+
+    def _migrate_attendance_sessions(self, conn: sqlite3.Connection) -> None:
+        """Add multi-session-per-day support to a pre-existing attendance table.
+
+        Older databases have one row per (date, employee) — a single sign-in/out
+        pair. Contractors can now be granted a second, reason-gated sign-in on
+        the same day, which needs its own row, so the old UNIQUE constraint has
+        to be widened. SQLite can't alter a UNIQUE constraint in place, so the
+        table is rebuilt and existing rows are kept as session 1.
+        """
+        if not self._table_exists(conn, "attendance"):
+            return
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(attendance)").fetchall()}
+        if "session_number" in columns:
+            return
+        conn.execute("ALTER TABLE attendance RENAME TO attendance_old")
+        conn.execute(
+            """
+            CREATE TABLE attendance (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                attendance_date TEXT NOT NULL,
+                employee_id TEXT NOT NULL,
+                session_number INTEGER NOT NULL DEFAULT 1,
+                sign_in TEXT,
+                sign_out TEXT,
+                reentry_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(attendance_date, employee_id, session_number),
+                FOREIGN KEY(employee_id) REFERENCES employees(employee_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO attendance
+                (attendance_date, employee_id, session_number, sign_in, sign_out, created_at, updated_at)
+            SELECT attendance_date, employee_id, 1, sign_in, sign_out, created_at, updated_at
+            FROM attendance_old
+            """
+        )
+        conn.execute("DROP TABLE attendance_old")
+        log.info("Migrated attendance table to support multiple sign-in sessions per day")
 
     def get_setting(self, key: str, default: str = "") -> str:
         with self.connect() as conn:
@@ -209,18 +265,37 @@ class Database:
             conn.execute("DELETE FROM attendance WHERE employee_id = ?", (employee_id,))
             conn.execute("DELETE FROM employees WHERE employee_id = ?", (employee_id,))
 
-    def get_attendance_for_date(self, attendance_date: str, employee_id: str) -> dict[str, Any] | None:
+    def get_attendance_for_date(
+        self, attendance_date: str, employee_id: str, session_number: int = 1
+    ) -> dict[str, Any] | None:
         with self.connect() as conn:
             row = conn.execute(
                 """
                 SELECT a.*, e.full_name, e.gender, e.department, e.position
                 FROM attendance a
                 JOIN employees e ON e.employee_id = a.employee_id
-                WHERE a.attendance_date = ? AND a.employee_id = ?
+                WHERE a.attendance_date = ? AND a.employee_id = ? AND a.session_number = ?
                 """,
-                (attendance_date, employee_id),
+                (attendance_date, employee_id, session_number),
             ).fetchone()
             return dict(row) if row else None
+
+    def get_attendance_sessions_for_date(
+        self, attendance_date: str, employee_id: str
+    ) -> list[dict[str, Any]]:
+        """All sign-in/out sessions for this employee on this date, in order."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT a.*, e.full_name, e.gender, e.department, e.position
+                FROM attendance a
+                JOIN employees e ON e.employee_id = a.employee_id
+                WHERE a.attendance_date = ? AND a.employee_id = ?
+                ORDER BY a.session_number
+                """,
+                (attendance_date, employee_id),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     def get_open_attendance(self, employee_id: str) -> dict[str, Any] | None:
         """Most recent attendance row for this employee that has no sign-out yet."""
@@ -231,41 +306,47 @@ class Database:
                 FROM attendance a
                 JOIN employees e ON e.employee_id = a.employee_id
                 WHERE a.employee_id = ? AND a.sign_out IS NULL
-                ORDER BY a.attendance_date DESC
+                ORDER BY a.attendance_date DESC, a.session_number DESC
                 LIMIT 1
                 """,
                 (employee_id,),
             ).fetchone()
             return dict(row) if row else None
 
-    def create_sign_in(self, attendance_date: str, employee_id: str, sign_in: str) -> dict[str, Any]:
+    def create_sign_in(
+        self, attendance_date: str, employee_id: str, sign_in: str,
+        session_number: int = 1, reason: str | None = None,
+    ) -> dict[str, Any]:
         now = datetime.now().isoformat(timespec="seconds")
         with self.connect() as conn:
             conn.execute(
                 """
-                INSERT INTO attendance(attendance_date, employee_id, sign_in, sign_out, created_at, updated_at)
-                VALUES(?, ?, ?, NULL, ?, ?)
+                INSERT INTO attendance
+                    (attendance_date, employee_id, session_number, sign_in, sign_out, reentry_reason, created_at, updated_at)
+                VALUES(?, ?, ?, ?, NULL, ?, ?, ?)
                 """,
-                (attendance_date, employee_id, sign_in, now, now),
+                (attendance_date, employee_id, session_number, sign_in, reason, now, now),
             )
-        return self.get_attendance_for_date(attendance_date, employee_id) or {}
+        return self.get_attendance_for_date(attendance_date, employee_id, session_number) or {}
 
-    def update_sign_out(self, attendance_date: str, employee_id: str, sign_out: str) -> dict[str, Any]:
+    def update_sign_out(
+        self, attendance_date: str, employee_id: str, sign_out: str, session_number: int = 1
+    ) -> dict[str, Any]:
         now = datetime.now().isoformat(timespec="seconds")
         with self.connect() as conn:
             conn.execute(
                 """
                 UPDATE attendance
                 SET sign_out = ?, updated_at = ?
-                WHERE attendance_date = ? AND employee_id = ?
+                WHERE attendance_date = ? AND employee_id = ? AND session_number = ?
                 """,
-                (sign_out, now, attendance_date, employee_id),
+                (sign_out, now, attendance_date, employee_id, session_number),
             )
-        return self.get_attendance_for_date(attendance_date, employee_id) or {}
+        return self.get_attendance_for_date(attendance_date, employee_id, session_number) or {}
 
     def set_attendance_times(
         self, attendance_date: str, employee_id: str,
-        sign_in: str | None, sign_out: str | None,
+        sign_in: str | None, sign_out: str | None, session_number: int = 1,
     ) -> None:
         now = datetime.now().isoformat(timespec="seconds")
         with self.connect() as conn:
@@ -273,16 +354,16 @@ class Database:
                 """
                 UPDATE attendance
                 SET sign_in = ?, sign_out = ?, updated_at = ?
-                WHERE attendance_date = ? AND employee_id = ?
+                WHERE attendance_date = ? AND employee_id = ? AND session_number = ?
                 """,
-                (sign_in or None, sign_out or None, now, attendance_date, employee_id),
+                (sign_in or None, sign_out or None, now, attendance_date, employee_id, session_number),
             )
 
-    def delete_attendance(self, attendance_date: str, employee_id: str) -> None:
+    def delete_attendance(self, attendance_date: str, employee_id: str, session_number: int = 1) -> None:
         with self.connect() as conn:
             conn.execute(
-                "DELETE FROM attendance WHERE attendance_date = ? AND employee_id = ?",
-                (attendance_date, employee_id),
+                "DELETE FROM attendance WHERE attendance_date = ? AND employee_id = ? AND session_number = ?",
+                (attendance_date, employee_id, session_number),
             )
 
     def attendance_report(
@@ -311,11 +392,11 @@ class Database:
             rows = conn.execute(
                 f"""
                 SELECT a.attendance_date, e.employee_id, e.full_name, e.gender, e.department,
-                       a.sign_in, a.sign_out
+                       a.session_number, a.sign_in, a.sign_out, a.reentry_reason
                 FROM attendance a
                 JOIN employees e ON e.employee_id = a.employee_id
                 {where}
-                ORDER BY a.attendance_date DESC, e.full_name
+                ORDER BY a.attendance_date DESC, e.full_name, a.session_number
                 """,
                 params,
             ).fetchall()

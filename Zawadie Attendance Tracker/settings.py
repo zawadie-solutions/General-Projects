@@ -19,9 +19,11 @@ ATTENDANCE_HEADERS = [
     "Name",
     "Gender",
     "Department",
+    "Session",
     "Sign In",
     "Sign Out",
     "Hours",
+    "Reason",
 ]
 
 

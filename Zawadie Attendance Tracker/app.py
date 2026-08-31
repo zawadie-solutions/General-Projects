@@ -401,6 +401,51 @@ class EmployeeListPage(QWidget):
             self.load()
 
 
+class ReentryReasonDialog(QDialog):
+    """Collects why a contractor needs to sign in again after already completing a session today."""
+
+    def __init__(self, employee_name: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Sign In Again")
+        self.setFixedWidth(420)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 28, 28, 28)
+        layout.setSpacing(12)
+
+        layout.addWidget(heading(f"{employee_name} already signed out today"))
+        layout.addWidget(muted_label(
+            "A sign-in and sign-out are already recorded for today. "
+            "Say why you need to sign in again — for example, you stepped away for a call — "
+            "then this will be your last sign-in for today."
+        ))
+
+        self.reason = QLineEdit()
+        self.reason.setPlaceholderText("e.g. Had to take an urgent call")
+        self.reason.returnPressed.connect(self._submit)
+        layout.addWidget(self.reason)
+
+        btns = QHBoxLayout()
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("secondaryButton")
+        cancel.clicked.connect(self.reject)
+        submit = QPushButton("Sign In Again")
+        submit.clicked.connect(self._submit)
+        btns.addWidget(cancel)
+        btns.addWidget(submit)
+        layout.addLayout(btns)
+
+        self.reason.setFocus()
+
+    def _submit(self) -> None:
+        if not self.reason.text().strip():
+            QMessageBox.warning(self, "Reason Required", "Please enter a reason to sign in again.")
+            return
+        self.accept()
+
+    def value(self) -> str:
+        return self.reason.text().strip()
+
+
 class ScannerPage(QWidget):
     def __init__(self, db: Database, auto_start: bool = False):
         super().__init__()
@@ -633,6 +678,19 @@ class ScannerPage(QWidget):
         self.latched_value = value
         self._unlatch_timer.start()
         result = self.attendance_service.record_scan(value)
+
+        if not result["ok"] and result.get("needs_reason"):
+            employee = result["employee"]
+            dlg = ReentryReasonDialog(employee["full_name"], self)
+            if dlg.exec() == QDialog.Accepted:
+                result = self.attendance_service.record_reentry(value, dlg.value())
+            else:
+                result = {
+                    "ok": False,
+                    "employee": employee,
+                    "message": f"{employee['full_name']} chose not to sign in again.",
+                }
+
         play_feedback_sound(result["ok"])
         if result["ok"]:
             log.info("%s: %s %s", value, result["status"], result["time"])
@@ -698,7 +756,8 @@ class AttendanceEditDialog(QDialog):
         layout.setSpacing(12)
 
         who = record.get("full_name") or record.get("employee_id", "")
-        layout.addWidget(heading(f"{who} — {display_date(record.get('attendance_date', ''))}"))
+        session_suffix = f" (Session {record['session_number']})" if record.get("session_number", 1) > 1 else ""
+        layout.addWidget(heading(f"{who} — {display_date(record.get('attendance_date', ''))}{session_suffix}"))
         layout.addWidget(muted_label("Use 12-hour times like  08:00 AM  or  05:30 PM. Leave blank to clear."))
 
         form = QFormLayout()
@@ -783,10 +842,10 @@ class AttendancePage(QWidget):
         filters.addStretch()
         layout.addWidget(fp)
 
-        self.table = QTableWidget(0, 9)
+        self.table = QTableWidget(0, 11)
         self.table.setHorizontalHeaderLabels(
-            ["Date", "Contractor ID", "Name", "Gender", "Department",
-             "Sign In", "Sign Out", "Hours", "Status"]
+            ["Date", "Contractor ID", "Name", "Gender", "Department", "Session",
+             "Sign In", "Sign Out", "Hours", "Status", "Reason"]
         )
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -832,7 +891,7 @@ class AttendancePage(QWidget):
             return
         sign_in, sign_out = dlg.values()
         self.db.set_attendance_times(
-            rec["attendance_date"], rec["employee_id"], sign_in, sign_out
+            rec["attendance_date"], rec["employee_id"], sign_in, sign_out, rec.get("session_number", 1)
         )
         log.info("Edited attendance %s/%s -> in=%r out=%r",
                  rec["employee_id"], rec["attendance_date"], sign_in, sign_out)
@@ -848,7 +907,7 @@ class AttendancePage(QWidget):
             f"{rec.get('full_name') or rec['employee_id']}?",
         ) != QMessageBox.Yes:
             return
-        self.db.delete_attendance(rec["attendance_date"], rec["employee_id"])
+        self.db.delete_attendance(rec["attendance_date"], rec["employee_id"], rec.get("session_number", 1))
         log.info("Deleted attendance %s/%s", rec["employee_id"], rec["attendance_date"])
         self.load()
 
@@ -879,10 +938,12 @@ class AttendancePage(QWidget):
                 rec.get("full_name", ""),
                 rec.get("gender", ""),
                 rec.get("department", ""),
+                rec.get("session_number", 1),
                 rec.get("sign_in") or "",
                 sign_out,
                 calculate_hours(rec.get("sign_in"), rec.get("sign_out")),
                 status,
+                rec.get("reentry_reason") or "",
             ]):
                 self.table.setItem(row, col, QTableWidgetItem(str(val)))
         self.table.resizeColumnsToContents()
@@ -984,9 +1045,13 @@ class DashboardPage(QWidget):
         today = datetime.now().strftime("%Y-%m-%d")
         today_records = self.db.attendance_report(today, today)
         contractors = len(self.db.list_employees())
-        present = len(today_records)
-        signed_out = len([r for r in today_records if r.get("sign_out")])
-        on_site = present - signed_out
+        # A contractor can have more than one session row today (reason-gated
+        # re-entry), so count distinct people rather than rows.
+        present_ids = {r["employee_id"] for r in today_records}
+        on_site_ids = {r["employee_id"] for r in today_records if not r.get("sign_out")}
+        present = len(present_ids)
+        on_site = len(on_site_ids)
+        signed_out = present - on_site
 
         row = QHBoxLayout()
         row.setSpacing(14)

@@ -24,9 +24,11 @@ def report_rows(records: list[dict[str, Any]]) -> list[list[str]]:
                 record.get("full_name", ""),
                 record.get("gender", ""),
                 record.get("department", ""),
+                str(record.get("session_number", 1)),
                 record.get("sign_in") or "",
                 record.get("sign_out") or "",
                 calculate_hours(record.get("sign_in"), record.get("sign_out")),
+                record.get("reentry_reason") or "",
             ]
         )
     return rows

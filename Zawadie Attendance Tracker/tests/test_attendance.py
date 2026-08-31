@@ -73,7 +73,48 @@ def test_sign_in_then_sign_out_same_day():
     assert svc.record_scan(eid)["status"] == "Sign In"
     assert svc.record_scan(eid)["status"] == "Sign Out"
     third = svc.record_scan(eid)
-    assert not third["ok"] and "already signed out" in third["message"]
+    assert not third["ok"] and third["needs_reason"]
+
+
+def test_third_scan_needs_reason_then_signs_in_again():
+    db = _new_db()
+    svc = AttendanceService(db)
+    eid = _add_employee(db)
+    assert svc.record_scan(eid)["status"] == "Sign In"
+    assert svc.record_scan(eid)["status"] == "Sign Out"
+
+    third = svc.record_scan(eid)
+    assert not third["ok"] and third["needs_reason"]
+
+    reentry = svc.record_reentry(eid, "Had to take an urgent call")
+    assert reentry["ok"] and reentry["status"] == "Sign In"
+    assert reentry["attendance"]["reentry_reason"] == "Had to take an urgent call"
+
+    fourth = svc.record_scan(eid)
+    assert fourth["ok"] and fourth["status"] == "Sign Out"
+
+    fifth = svc.record_scan(eid)
+    assert not fifth["ok"]
+    assert not fifth.get("needs_reason")
+
+
+def test_reentry_without_a_reason_is_rejected():
+    db = _new_db()
+    svc = AttendanceService(db)
+    eid = _add_employee(db)
+    svc.record_scan(eid)
+    svc.record_scan(eid)
+    result = svc.record_reentry(eid, "   ")
+    assert not result["ok"]
+
+
+def test_reentry_before_completing_first_session_is_rejected():
+    db = _new_db()
+    svc = AttendanceService(db)
+    eid = _add_employee(db)
+    svc.record_scan(eid)  # sign in, still open
+    result = svc.record_reentry(eid, "Some reason")
+    assert not result["ok"]
 
 
 def test_unknown_id_is_rejected():
