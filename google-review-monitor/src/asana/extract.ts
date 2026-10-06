@@ -51,9 +51,20 @@ export function pickGoogleReviewUrl(notes: string | null | undefined, htmlNotes?
   return [...candidates].sort((a, b) => score(b) - score(a))[0]; // stable: keeps description order on ties
 }
 
+/** A line of the form "John Smith - https://maps.app.goo.gl/…" (name, dash, link). */
+const NAME_DASH_URL_RE = /^[ \t]*([^\n]+?)[ \t]*[-–][ \t]*https?:\/\/\S+[ \t]*$/im;
+
 export function parseReviewerName(notes: string | null | undefined): string | null {
-  const m = (notes ?? "").match(/^\s*(?:reviewer(?:\s*name)?|review\s*author|author)\s*[:\-–]\s*(.+?)\s*$/im);
+  const text = notes ?? "";
+  const m =
+    text.match(/^\s*(?:reviewer(?:\s*name)?|review\s*author|author)\s*[:\-–]\s*(.+?)\s*$/im) ?? text.match(NAME_DASH_URL_RE);
   return m ? m[1].trim() : null;
+}
+
+/** Task titles of the form "Dispute 3: Google - Blair Sy" carry the reviewer after the dash. */
+export function parseReviewerFromTitle(title: string | null | undefined): string | null {
+  const m = (title ?? "").match(/\bgoogle\s*[-–:]\s*(\S.*?)\s*$/i);
+  return m ? m[1] : null;
 }
 
 export function parseRating(notes: string | null | undefined): number | null {
@@ -75,6 +86,7 @@ export function parseReviewText(notes: string | null | undefined): string | null
     : text
         .split("\n")
         .filter((l) => !/^\s*(?:reviewer(?:\s*name)?|review\s*author|author|rating|stars?)\s*[:\-–]/i.test(l))
+        .filter((l) => !/^[^\n]+?[ \t]*[-–:][ \t]*https?:\/\/\S+[ \t]*$/i.test(l)) // "Name - link" / "Name: link"
         .join("\n");
   const cleaned = body.replace(URL_RE, "").replace(/[ \t]+\n/g, "\n").trim();
   return cleaned ? cleaned.slice(0, 2000) : null;

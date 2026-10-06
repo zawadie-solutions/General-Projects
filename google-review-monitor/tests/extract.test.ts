@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isGoogleReviewUrl, parseRating, parseReviewerName, parseReviewText, pickGoogleReviewUrl } from "../src/asana/extract";
+import {
+  isGoogleReviewUrl,
+  parseRating,
+  parseReviewerFromTitle,
+  parseReviewerName,
+  parseReviewText,
+  pickGoogleReviewUrl,
+} from "../src/asana/extract";
 
 describe("url extraction", () => {
   it("picks the Google review link among several URLs and strips trailing punctuation", () => {
@@ -24,6 +31,12 @@ describe("url extraction", () => {
   });
   it("parses reviewer and rating", () => {
     expect(parseReviewerName("Reviewer: John Smith\nfoo")).toBe("John Smith");
+    expect(parseReviewerName("joe gauna - https://maps.app.goo.gl/qZAb")).toBe("joe gauna");
+    expect(parseReviewerName("https://maps.app.goo.gl/qZAb")).toBeNull();
+    expect(parseReviewText("joe gauna - https://maps.app.goo.gl/qZAb")).toBeNull();
+    expect(parseReviewText("Blair Sy: https://maps.app.goo.gl/qZAb")).toBeNull();
+    expect(parseReviewerFromTitle("Dispute 3: Google - Blair Sy")).toBe("Blair Sy");
+    expect(parseReviewerFromTitle("Dispute 2")).toBeNull();
     expect(parseRating("Rating: 1")).toBe(1);
     expect(parseRating("a 5-star review")).toBe(5);
     expect(parseRating("nothing")).toBeNull();

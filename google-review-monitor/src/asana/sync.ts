@@ -3,7 +3,7 @@ import type { ReviewRepo } from "../db/repo";
 import { logger } from "../logger";
 import type { DiscoveredReview } from "../types";
 import type { AsanaClient, AsanaTask } from "./client";
-import { parseRating, parseReviewerName, parseReviewText, pickGoogleReviewUrl } from "./extract";
+import { parseRating, parseReviewerFromTitle, parseReviewerName, parseReviewText, pickGoogleReviewUrl } from "./extract";
 
 export type AsanaSource = Pick<AsanaClient, "sections" | "sectionTasks" | "subtasks">;
 export type AsanaSettings = Pick<
@@ -50,7 +50,8 @@ export function toDiscovered(w: WalkedTask, s: AsanaSettings): DiscoveredReview 
       path[s.locationIndex] && s.locationIndex < path.length - 1
         ? path[s.locationIndex]
         : (ancestors[ancestors.length - 1] ?? null),
-    reviewerName: parseReviewerName(task.notes) ?? (s.reviewerFromTitle ? task.name : null),
+    reviewerName:
+      parseReviewerName(task.notes) ?? parseReviewerFromTitle(task.name) ?? (s.reviewerFromTitle ? task.name : null),
     rating: parseRating(task.notes),
     reviewText: parseReviewText(task.notes),
     googleReviewUrl: url,
