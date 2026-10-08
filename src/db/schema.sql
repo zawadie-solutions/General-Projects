@@ -32,3 +32,18 @@ CREATE TABLE IF NOT EXISTS review_check_history (
 );
 
 ALTER TABLE reviews ADD COLUMN IF NOT EXISTS review_text TEXT;
+-- The Asana project (month) a review came from. `month` is just a display label (the
+-- container task's name, which doesn't match the project's own name) — this is the real key.
+ALTER TABLE reviews ADD COLUMN IF NOT EXISTS asana_project_gid TEXT;
+
+-- Tracks every "<Month> Managed Disputes <Year>" Asana project found, so the dashboard can
+-- list all of them (synced or not) and know whether a run is currently in progress.
+CREATE TABLE IF NOT EXISTS asana_month_projects (
+  project_gid TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  last_synced_at TIMESTAMPTZ,
+  last_review_count INTEGER,
+  run_status TEXT NOT NULL DEFAULT 'idle',
+  last_run_error TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -35,7 +35,10 @@ async function safeCheck(checker: ReviewChecker, row: ReviewRow): Promise<CheckR
  * A REMOVED verdict is only accepted if a second check, after a delay, agrees.
  * Anything else downgrades to EXISTS/UNKNOWN. This is the main guard against false alerts.
  */
-export async function checkWithConfirmation(deps: CycleDeps, row: ReviewRow): Promise<CheckResult> {
+export async function checkWithConfirmation(
+  deps: Pick<CycleDeps, "checker" | "removalRecheckDelayMs">,
+  row: ReviewRow,
+): Promise<CheckResult> {
   const first = await safeCheck(deps.checker, row);
   if (first.status !== "REVIEW_REMOVED") return first;
   await sleep(deps.removalRecheckDelayMs);

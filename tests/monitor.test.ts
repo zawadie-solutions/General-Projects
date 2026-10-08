@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { syncAsana } from "../src/asana/sync";
 import { BusinessProfileChecker } from "../src/google/businessProfileChecker";
 import { runCycle } from "../src/monitor/cycle";
+import { SlackDmNotifier } from "../src/notify/slack";
 import { deps, fakeAsana, fakeChecker, fakeNotifier, makeRepo, review, settings } from "./helpers";
 
 const EXISTS = { status: "REVIEW_EXISTS" } as const;
@@ -161,5 +162,146 @@ describe("BusinessProfileChecker", () => {
     expect((await c.checkReview({ ...input, googleReviewUrl: "https://evil.example/maps" })).status).toBe("UNKNOWN");
     expect((await c.checkReview({ ...input, location: "Nowhere" })).status).toBe("UNKNOWN");
     expect((await c.checkReview({ ...input, reviewerName: null })).status).toBe("UNKNOWN");
+  });
+});
+
+describe("SlackDmNotifier", () => {
+  const msg = { subject: "Google Review Removed", text: "Location: A\nReviewer: John Smith", html: "" };
+  const creds = { botToken: "xoxb-test", recipientUserIds: ["U123"] };
+
+  it("posts to chat.postMessage with the recipient as channel and subject+text combined", async () => {
+    let seen: { url: string; init: RequestInit } | undefined;
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      seen = { url: String(url), init };
+      return new Response(JSON.stringify({ ok: true }));
+    }) as typeof fetch;
+    await new SlackDmNotifier(creds, fetchImpl).send(msg);
+    expect(seen?.url).toBe("https://slack.com/api/chat.postMessage");
+    expect(seen?.init.headers).toMatchObject({ Authorization: "Bearer xoxb-test" });
+    const body = JSON.parse(seen?.init.body as string);
+    expect(body.channel).toBe("U123");
+    expect(body.text).toContain(msg.subject);
+    expect(body.text).toContain("John Smith");
+  });
+
+  it("HTTP error -> throws", async () => {
+    const fetchImpl = (async () => new Response("", { status: 500 })) as typeof fetch;
+    await expect(new SlackDmNotifier(creds, fetchImpl).send(msg)).rejects.toThrow("HTTP 500");
+  });
+
+  it("Slack API error (ok: false) -> throws", async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({ ok: false, error: "channel_not_found" }))) as typeof fetch;
+    await expect(new SlackDmNotifier(creds, fetchImpl).send(msg)).rejects.toThrow("channel_not_found");
+  });
+
+  it("sends an individual DM to every recipient", async () => {
+    const seenChannels: string[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      seenChannels.push(JSON.parse(init.body as string).channel);
+      return new Response(JSON.stringify({ ok: true }));
+    }) as typeof fetch;
+    await new SlackDmNotifier({ botToken: "xoxb-test", recipientUserIds: ["U1", "U2"] }, fetchImpl).send(msg);
+    expect(seenChannels).toEqual(["U1", "U2"]);
+  });
+
+  it("one recipient failing still attempts the rest, then throws naming only the failure(s)", async () => {
+    const seenChannels: string[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      const channel = JSON.parse(init.body as string).channel;
+      seenChannels.push(channel);
+      return new Response(JSON.stringify(channel === "U1" ? { ok: false, error: "not_in_channel" } : { ok: true }));
+    }) as typeof fetch;
+    const n = new SlackDmNotifier({ botToken: "xoxb-test", recipientUserIds: ["U1", "U2"] }, fetchImpl);
+    const err = await n.send(msg).then(
+      () => null,
+      (e: Error) => e,
+    );
+    expect(seenChannels).toEqual(["U1", "U2"]); // U2 was still attempted after U1 failed
+    expect(err?.message).toContain("U1: not_in_channel");
+    expect(err?.message).not.toContain("U2");
+  });
+});
+
+describe("month scoping (for the dashboard's month filter / check-month)", () => {
+  async function twoMonths() {
+    const { repo } = await makeRepo();
+    const sep = await repo.upsertDiscovered(
+      review({ asanaTaskId: "s1", asanaProjectGid: "proj-sep", month: "September", reviewerName: "Sep Reviewer" }),
+    );
+    const oct = await repo.upsertDiscovered(
+      review({ asanaTaskId: "o1", asanaProjectGid: "proj-oct", month: "October", reviewerName: "Oct Reviewer" }),
+    );
+    expect([sep, oct]).toEqual([true, true]);
+    const [sepRow, octRow] = await repo.all();
+    await repo.recordCheck(sepRow, REMOVED);
+    await repo.recordCheck(octRow, REMOVED);
+    return { repo, sepRow, octRow };
+  }
+
+  it("distinctProjects lists every project present, with its display month", async () => {
+    const { repo } = await twoMonths();
+    const projects = await repo.distinctProjects();
+    expect(new Set(projects.map((p) => p.projectGid))).toEqual(new Set(["proj-sep", "proj-oct"]));
+    expect(projects.find((p) => p.projectGid === "proj-sep")?.month).toBe("September");
+    expect(projects.find((p) => p.projectGid === "proj-sep")?.count).toBe(1);
+  });
+
+  it("summary/removedReviews/recentActivity scope to the given project only", async () => {
+    const { repo } = await twoMonths();
+    expect((await repo.summary("proj-sep")).removed).toBe(1);
+    expect((await repo.summary("proj-sep")).monitored).toBe(1);
+    expect((await repo.removedReviews({ projectGid: "proj-sep" })).map((r) => r.reviewer_name)).toEqual(["Sep Reviewer"]);
+    expect((await repo.recentActivity({ projectGid: "proj-oct" }))[0].removedDetails[0].reviewerName).toBe("Oct Reviewer");
+    // no project filter -> sees both
+    expect((await repo.summary()).monitored).toBe(2);
+    expect((await repo.removedReviews({})).length).toBe(2);
+  });
+
+  it("listByAsanaTaskIds finds only the requested tasks, and setMonitoringActive retires them", async () => {
+    const { repo, sepRow, octRow } = await twoMonths();
+    const found = await repo.listByAsanaTaskIds(["s1"]);
+    expect(found.map((r) => r.id)).toEqual([sepRow.id]);
+    expect(await repo.listByAsanaTaskIds([])).toEqual([]);
+
+    await repo.setMonitoringActive([sepRow.id, octRow.id], false);
+    expect(await repo.listToCheck()).toEqual([]);
+  });
+});
+
+describe("asana_month_projects run tracking (for the dashboard's Run now button)", () => {
+  it("a second run cannot start while one is in progress for the same project", async () => {
+    const { repo } = await makeRepo();
+    expect(await repo.tryStartAsanaRun("p1", "October 2026")).toBe(true);
+    expect(await repo.tryStartAsanaRun("p1", "October 2026")).toBe(false); // already running
+    expect(await repo.tryStartAsanaRun("p2", "September 2026")).toBe(true); // different project, unaffected
+
+    const [p1] = (await repo.listAsanaProjects()).filter((p) => p.project_gid === "p1");
+    expect(p1.run_status).toBe("running");
+  });
+
+  it("finishAsanaRun records success or failure, then a new run can start again", async () => {
+    const { repo } = await makeRepo();
+    await repo.tryStartAsanaRun("p1", "October 2026");
+    await repo.finishAsanaRun("p1", { ok: true, reviewCount: 42 });
+
+    let [p1] = await repo.listAsanaProjects();
+    expect(p1.run_status).toBe("done");
+    expect(p1.last_review_count).toBe(42);
+    expect(p1.last_synced_at).toBeTruthy();
+
+    expect(await repo.tryStartAsanaRun("p1", "October 2026")).toBe(true); // not running anymore -> can start
+
+    await repo.finishAsanaRun("p1", { ok: false, error: "google down" });
+    [p1] = await repo.listAsanaProjects();
+    expect(p1.run_status).toBe("failed");
+    expect(p1.last_run_error).toBe("google down");
+  });
+
+  it("a stuck 'running' row older than staleMinutes is reclaimed", async () => {
+    const { repo, db } = await makeRepo();
+    await repo.tryStartAsanaRun("p1", "October 2026");
+    await db.query("UPDATE asana_month_projects SET updated_at = now() - INTERVAL '1 hour' WHERE project_gid = 'p1'");
+
+    expect(await repo.tryStartAsanaRun("p1", "October 2026", 20)).toBe(true); // 1h > 20min stale threshold
   });
 });

@@ -58,6 +58,15 @@ export const config = {
       .map((s) => s.trim())
       .filter(Boolean),
   }),
+  /** Slack DM is used instead of email when a bot token is configured. */
+  slackEnabled: Boolean(env.SLACK_BOT_TOKEN),
+  slack: () => ({
+    botToken: required("SLACK_BOT_TOKEN"),
+    recipientUserIds: required("SLACK_RECIPIENT_USER_ID")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  }),
 };
 
 export type AsanaConfig = ReturnType<typeof config.asana>;

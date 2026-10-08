@@ -1,9 +1,9 @@
 # Google Review Monitor
 
-A daily job (07:00 CAT) that reads Google review links from Asana, checks whether each review still exists, and **emails Vanessa once** when a review has disappeared. A small read-only dashboard (white/green/red, Basic auth, needs `DASHBOARD_PASSWORD`) shows the results: `npm start` runs scheduler + dashboard, `npm run dashboard` runs the dashboard alone, `npm run preview` shows it with fake data on http://localhost:3100 (demo / demo).
+A daily job (07:00 CAT) that reads Google review links from Asana, checks whether each review still exists, and **notifies Vanessa once** when a review has disappeared — as a Slack DM if `SLACK_BOT_TOKEN` is set, otherwise by email. A small read-only dashboard (white/green/red, Basic auth, needs `DASHBOARD_PASSWORD`) is a monitoring panel, not a review-management tool: three counts (monitored / still available / removed), the last and next check times, which reviews are currently flagged as removed (with a link to the Asana task), and a short daily activity feed. `npm start` runs scheduler + dashboard, `npm run dashboard` runs the dashboard alone, `npm run preview` shows it with fake data on http://localhost:3100 (demo / demo).
 
 ```
-Asana -> Google URL -> checkReview() -> EXISTS: silent | UNKNOWN: log, retry tomorrow | REMOVED: email once
+Asana -> Google URL -> checkReview() -> EXISTS: silent | UNKNOWN: log, retry tomorrow | REMOVED: notify once (Slack DM or email)
 ```
 
 ## Setup
@@ -14,13 +14,18 @@ Asana -> Google URL -> checkReview() -> EXISTS: silent | UNKNOWN: log, retry tom
 5. `npm run poc -- --url <url> --location "Location A" --reviewer "John Smith"` on one live and one removed review before trusting it.
 6. `npm run run-once` does one full cycle (exit code 1 if any stage failed). `npm start` keeps a process running that does it daily at 07:00 `Africa/Maputo` (CAT, UTC+2, no DST). Alternatively schedule `npm run run-once` with Windows Task Scheduler.
 
+## Months
+Each month is a separate Asana project (separate `ASANA_PROJECT_GID`). The daily 07:00 job only ever syncs/checks/notifies for the one project currently in `.env` — the current month, by design, so the automated job's workload doesn't grow every time a new month starts.
+
+To look back at an older month on demand (e.g. "did that review from two months ago ever get removed?"), run `npm run check-month -- --project <that month's Asana project gid> [--notify]`. It syncs and checks just that project, then marks every review it touched as no longer part of the daily cycle — so a look-back never bloats the automated job. Results land in the DB and show up in the dashboard's month picker (only shown once more than one month has been synced); pass `--notify` to actually send a Slack DM/email for anything it finds removed, which is off by default since a stale dispute resurfacing shouldn't page Vanessa the way a fresh one should.
+
 ## Rules that prevent false alerts
 - `REVIEW_REMOVED` only if Google's review listing for the location is complete **and** the reviewer is absent **and** a second check a minute later agrees. Anything else (HTTP error, rate limit, auth, timeout, incomplete listing, bad URL, unmapped location, missing reviewer name) is `UNKNOWN`: logged, no email, retried next run.
-- One digest email for newly removed reviews only. `notification_sent` is set only after the email succeeds; a failed send is retried next run. A review is emailed once, then no longer checked (`KEEP_CHECKING_REMOVED=true` to keep checking; a reappearing review resets its state).
+- One digest notification for newly removed reviews only. `notification_sent` is set only after the send succeeds; a failed send is retried next run. A review is notified once, then no longer checked (`KEEP_CHECKING_REMOVED=true` to keep checking; a reappearing review resets its state).
 - The Asana sync reads everything before writing, so an Asana failure leaves existing records untouched.
 
 ## Limits
 Uses the Google Business Profile API, which only works for locations the authorised Google account manages, and matches by reviewer display name (Asana has no review ID). A renamed reviewer could look removed. Not yet verified against live Google/Asana — only mocked tests (`npm test`). Pilot against manual checks first. Run a single instance. If an email is sent but the DB write then fails, a duplicate is possible.
 
 ## Layout
-`src/asana` sync · `src/google` checker (swap behind `ReviewChecker`) · `src/notify` email · `src/monitor/cycle.ts` the daily job · `src/db` schema + repo · `src/index.ts` scheduler
+`src/asana` sync · `src/google` checker (swap behind `ReviewChecker`) · `src/notify` Slack DM / email (swap behind `Notifier`) · `src/monitor/cycle.ts` the daily job · `src/db` schema + repo · `src/index.ts` scheduler

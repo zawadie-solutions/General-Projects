@@ -23,12 +23,14 @@ const texts = [
 ];
 const locations = ["Location A", "Location B", "Location C"];
 const months = ["September", "October"];
+const projectGids = ["demo-sep-project", "demo-oct-project"];
 
 for (const [i, name] of people.entries()) {
   await repo.upsertDiscovered({
     asanaTaskId: String(1000 + i),
     asanaTaskName: `Review by ${name}`,
     asanaTaskUrl: `https://app.asana.com/0/1/${1000 + i}`,
+    asanaProjectGid: projectGids[i % 2],
     location: locations[i % 3],
     month: months[i % 2],
     reviewerName: name,
@@ -46,6 +48,13 @@ for (const [i, r] of all.entries()) {
 }
 await repo.markNotified([all[0].id], true); // first removal notified, second still pending
 
-createApp({ repo, user: "demo", password: "demo" }).listen(3100, () =>
+// Spread history rows over a few days so "Recent activity" has more than just today in the demo.
+const { rows: historyRows } = await db.query<{ id: number }>("SELECT id FROM review_check_history ORDER BY id");
+for (const [i, row] of historyRows.entries()) {
+  const daysAgo = i % 3;
+  if (daysAgo > 0) await db.query(`UPDATE review_check_history SET checked_at = now() - INTERVAL '${daysAgo} days' WHERE id = $1`, [row.id]);
+}
+
+createApp({ repo, user: "demo", password: "demo", scheduleCron: "0 7 * * *", timezone: "Africa/Maputo" }).listen(3100, () =>
   console.log("Preview at http://localhost:3100  (login: demo / demo)"),
 );

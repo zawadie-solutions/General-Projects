@@ -18,6 +18,7 @@ export const review = (over: Partial<DiscoveredReview> = {}): DiscoveredReview =
   asanaTaskId: "100",
   asanaTaskName: "Review by John Smith",
   asanaTaskUrl: "https://app.asana.com/0/1/100",
+  asanaProjectGid: "p1",
   location: "Location A",
   month: "October",
   reviewerName: "John Smith",

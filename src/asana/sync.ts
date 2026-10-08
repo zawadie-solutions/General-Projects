@@ -3,7 +3,7 @@ import type { ReviewRepo } from "../db/repo";
 import { logger } from "../logger";
 import type { DiscoveredReview } from "../types";
 import type { AsanaClient, AsanaTask } from "./client";
-import { parseRating, parseReviewerName, parseReviewText, pickGoogleReviewUrl } from "./extract";
+import { parseRating, parseReviewerFromTitle, parseReviewerName, parseReviewText, pickGoogleReviewUrl } from "./extract";
 
 export type AsanaSource = Pick<AsanaClient, "sections" | "sectionTasks" | "subtasks">;
 export type AsanaSettings = Pick<
@@ -17,19 +17,49 @@ export interface WalkedTask {
   path: string[];
 }
 
-/** Walk every task (and subtasks, to maxDepth) in the project, remembering the name path. */
-export async function walkProject(client: AsanaSource, s: AsanaSettings): Promise<WalkedTask[]> {
-  const out: WalkedTask[] = [];
-  const visit = async (task: AsanaTask, path: string[], depth: number) => {
-    out.push({ task, path });
-    if (depth < s.maxDepth && (task.num_subtasks ?? 0) > 0) {
-      for (const sub of await client.subtasks(task.gid)) await visit(sub, [...path, sub.name], depth + 1);
-    }
+/** Runs `fn` over `items` with at most `limit` calls in flight at once. */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (let i = next++; i < items.length; i = next++) results[i] = await fn(items[i]);
   };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/**
+ * Walk every task (and subtasks, to maxDepth) in the project, remembering the name path.
+ * Expands one level at a time with bounded concurrency: a project with hundreds of
+ * location-level tasks, each with its own subtasks, makes the naive one-at-a-time walk
+ * take an impractically long time (and can look hung, since nothing prints until it's done).
+ */
+export async function walkProject(
+  client: AsanaSource,
+  s: AsanaSettings,
+  opts: { concurrency?: number; onProgress?: (scanned: number) => void } = {},
+): Promise<WalkedTask[]> {
+  const concurrency = opts.concurrency ?? 8;
+  const out: WalkedTask[] = [];
+
+  const expand = async (level: { task: AsanaTask; path: string[] }[], depth: number): Promise<void> => {
+    for (const item of level) out.push(item);
+    opts.onProgress?.(out.length);
+    if (depth >= s.maxDepth) return;
+    const expandable = level.filter((t) => (t.task.num_subtasks ?? 0) > 0);
+    if (!expandable.length) return;
+    const childLevels = await mapLimit(expandable, concurrency, async ({ task, path }) =>
+      (await client.subtasks(task.gid)).map((sub) => ({ task: sub, path: [...path, sub.name] })),
+    );
+    await expand(childLevels.flat(), depth + 1);
+  };
+
   for (const section of await client.sections(s.projectGid)) {
-    for (const task of await client.sectionTasks(section.gid)) {
-      await visit(task, [section.name, task.name], 1);
-    }
+    const tasks = await client.sectionTasks(section.gid);
+    await expand(
+      tasks.map((task) => ({ task, path: [section.name, task.name] })),
+      1,
+    );
   }
   return out;
 }
@@ -45,12 +75,13 @@ export function toDiscovered(w: WalkedTask, s: AsanaSettings): DiscoveredReview 
     asanaTaskId: task.gid,
     asanaTaskName: task.name,
     asanaTaskUrl: task.permalink_url ?? `https://app.asana.com/0/0/${task.gid}`,
+    asanaProjectGid: s.projectGid,
     month: path[s.monthIndex] && s.monthIndex < path.length - 1 ? path[s.monthIndex] : (ancestors[0] ?? null),
     location:
       path[s.locationIndex] && s.locationIndex < path.length - 1
         ? path[s.locationIndex]
         : (ancestors[ancestors.length - 1] ?? null),
-    reviewerName: parseReviewerName(task.notes) ?? (s.reviewerFromTitle ? task.name : null),
+    reviewerName: parseReviewerName(task.notes) ?? parseReviewerFromTitle(task.name) ?? (s.reviewerFromTitle ? task.name : null),
     rating: parseRating(task.notes),
     reviewText: parseReviewText(task.notes),
     googleReviewUrl: url,
@@ -61,6 +92,8 @@ export interface SyncSummary {
   tasksScanned: number;
   reviewsFound: number;
   created: number;
+  /** asana_task_id of every review task this sync touched (created or refreshed). */
+  taskIds: string[];
 }
 
 /**
@@ -68,10 +101,18 @@ export interface SyncSummary {
  * propagates before any DB write, so existing records stay exactly as they were.
  */
 export async function syncAsana(client: AsanaSource, repo: ReviewRepo, s: AsanaSettings): Promise<SyncSummary> {
-  const walked = await walkProject(client, s);
+  let lastLogged = 0;
+  const walked = await walkProject(client, s, {
+    onProgress: (scanned) => {
+      if (scanned - lastLogged >= 200) {
+        lastLogged = scanned;
+        logger.info({ scanned }, "asana walk in progress");
+      }
+    },
+  });
   const reviews = walked.map((w) => toDiscovered(w, s)).filter((r): r is DiscoveredReview => r !== null);
   let created = 0;
   for (const r of reviews) if (await repo.upsertDiscovered(r)) created++;
   logger.info({ tasksScanned: walked.length, reviewsFound: reviews.length, created }, "asana sync done");
-  return { tasksScanned: walked.length, reviewsFound: reviews.length, created };
+  return { tasksScanned: walked.length, reviewsFound: reviews.length, created, taskIds: reviews.map((r) => r.asanaTaskId) };
 }

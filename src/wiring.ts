@@ -6,6 +6,8 @@ import { ReviewRepo } from "./db/repo";
 import { BusinessProfileChecker, loadLocationMap, OAuthRefreshTokenProvider } from "./google/businessProfileChecker";
 import type { CycleDeps } from "./monitor/cycle";
 import { EmailNotifier } from "./notify/email";
+import { SlackDmNotifier } from "./notify/slack";
+import type { Notifier } from "./types";
 
 export function buildChecker() {
   const g = config.google();
@@ -13,6 +15,10 @@ export function buildChecker() {
     auth: new OAuthRefreshTokenProvider(g),
     locationMap: loadLocationMap(g.locationsFile),
   });
+}
+
+export function buildNotifier(): Notifier {
+  return config.slackEnabled ? new SlackDmNotifier(config.slack()) : new EmailNotifier(config.email());
 }
 
 export function buildDeps(): { db: ReturnType<typeof createDb>; repo: ReviewRepo; deps: CycleDeps } {
@@ -23,7 +29,7 @@ export function buildDeps(): { db: ReturnType<typeof createDb>; repo: ReviewRepo
   const deps: CycleDeps = {
     repo,
     checker: buildChecker(),
-    notifier: new EmailNotifier(config.email()),
+    notifier: buildNotifier(),
     sync: () => syncAsana(client, repo, a),
     removalRecheckDelayMs: config.removalRecheckDelayMs,
     checkDelayMs: config.checkDelayMs,

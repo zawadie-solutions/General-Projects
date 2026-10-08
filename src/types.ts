@@ -27,6 +27,7 @@ export interface DiscoveredReview {
   asanaTaskId: string;
   asanaTaskName: string;
   asanaTaskUrl: string;
+  asanaProjectGid: string;
   location: string | null;
   month: string | null;
   reviewerName: string | null;
@@ -40,6 +41,7 @@ export interface ReviewRow {
   asana_task_id: string;
   asana_task_name: string;
   asana_task_url: string;
+  asana_project_gid: string | null;
   location: string | null;
   month: string | null;
   reviewer_name: string | null;

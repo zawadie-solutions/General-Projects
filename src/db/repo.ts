@@ -1,12 +1,21 @@
 import type { Db } from "./db";
 import type { CheckResult, DiscoveredReview, ReviewRow } from "../types";
 
-export interface ReviewFilters {
-  status?: string;
-  location?: string;
-  month?: string;
-  from?: string;
-  to?: string;
+export interface DayActivity {
+  date: string;
+  checked: number;
+  removed: number;
+  removedDetails: { location: string | null; reviewerName: string | null }[];
+}
+
+export interface AsanaProjectRow {
+  project_gid: string;
+  display_name: string;
+  last_synced_at: Date | null;
+  last_review_count: number | null;
+  run_status: "idle" | "running" | "done" | "failed";
+  last_run_error: string | null;
+  updated_at: Date;
 }
 
 export class ReviewRepo {
@@ -18,21 +27,43 @@ export class ReviewRepo {
     const row = existing.rows[0];
     if (!row) {
       await this.db.query(
-        `INSERT INTO reviews (asana_task_id, asana_task_name, asana_task_url, location, month,
+        `INSERT INTO reviews (asana_task_id, asana_task_name, asana_task_url, asana_project_gid, location, month,
            reviewer_name, rating, review_text, google_review_url)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-        [d.asanaTaskId, d.asanaTaskName, d.asanaTaskUrl, d.location, d.month, d.reviewerName, d.rating, d.reviewText, d.googleReviewUrl],
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [
+          d.asanaTaskId,
+          d.asanaTaskName,
+          d.asanaTaskUrl,
+          d.asanaProjectGid,
+          d.location,
+          d.month,
+          d.reviewerName,
+          d.rating,
+          d.reviewText,
+          d.googleReviewUrl,
+        ],
       );
       return true;
     }
     // If the link was replaced the old verdict no longer applies: start over.
     const urlChanged = row.google_review_url !== d.googleReviewUrl;
     await this.db.query(
-      `UPDATE reviews SET asana_task_name=$2, asana_task_url=$3, location=$4, month=$5, reviewer_name=$6,
-         rating=$7, google_review_url=$8, review_text=$9, updated_at=now()
+      `UPDATE reviews SET asana_task_name=$2, asana_task_url=$3, asana_project_gid=$4, location=$5, month=$6, reviewer_name=$7,
+         rating=$8, google_review_url=$9, review_text=$10, updated_at=now()
          ${urlChanged ? ", status='UNKNOWN', removed_at=NULL, notification_sent=false, notification_sent_at=NULL, monitoring_active=true, last_error=NULL" : ""}
        WHERE id=$1`,
-      [row.id, d.asanaTaskName, d.asanaTaskUrl, d.location, d.month, d.reviewerName, d.rating, d.googleReviewUrl, d.reviewText],
+      [
+        row.id,
+        d.asanaTaskName,
+        d.asanaTaskUrl,
+        d.asanaProjectGid,
+        d.location,
+        d.month,
+        d.reviewerName,
+        d.rating,
+        d.googleReviewUrl,
+        d.reviewText,
+      ],
     );
     return false;
   }
@@ -47,34 +78,37 @@ export class ReviewRepo {
     return r.rows;
   }
 
-  /** Dashboard list: removed first, then most recent activity. */
-  async list(f: ReviewFilters = {}): Promise<ReviewRow[]> {
-    const where: string[] = [];
+  /** Reviews currently flagged as removed, most recent first — what the dashboard needs attention on. */
+  async removedReviews(opts: { projectGid?: string; limit?: number } = {}): Promise<ReviewRow[]> {
     const p: unknown[] = [];
-    const add = (sql: string, v: unknown) => {
-      p.push(v);
-      where.push(sql.replace("?", `$${p.length}`));
-    };
-    if (f.status) add("status = ?", f.status);
-    if (f.location) add("location = ?", f.location);
-    if (f.month) add("month = ?", f.month);
-    if (f.from) add("COALESCE(removed_at, last_checked_at, first_seen_at) >= ?", f.from);
-    if (f.to) add("COALESCE(removed_at, last_checked_at, first_seen_at) <= ?", f.to);
+    const proj = opts.projectGid ? `AND asana_project_gid = $${p.push(opts.projectGid)}` : "";
+    const limit = opts.limit ?? 100;
     const r = await this.db.query<ReviewRow>(
-      `SELECT * FROM reviews ${where.length ? "WHERE " + where.join(" AND ") : ""}
-       ORDER BY (status='REVIEW_REMOVED') DESC, COALESCE(removed_at, last_checked_at, first_seen_at) DESC LIMIT 2000`,
+      `SELECT * FROM reviews WHERE status='REVIEW_REMOVED' ${proj} ORDER BY removed_at DESC NULLS LAST, id DESC LIMIT $${p.push(limit)}`,
       p,
     );
     return r.rows;
   }
 
-  async summary() {
-    const r = await this.db.query<{ status: string; n: string }>("SELECT status, COUNT(*) AS n FROM reviews GROUP BY status");
+  /** Every Asana project with synced reviews, most recently synced first — the dashboard's month filter options. */
+  async distinctProjects(): Promise<{ projectGid: string; month: string | null; count: number }[]> {
+    const r = await this.db.query<{ asana_project_gid: string; month: string | null; n: string }>(
+      `SELECT asana_project_gid, MAX(month) AS month, COUNT(*) AS n FROM reviews
+       WHERE asana_project_gid IS NOT NULL GROUP BY asana_project_gid ORDER BY MAX(created_at) DESC`,
+    );
+    return r.rows.map((x) => ({ projectGid: x.asana_project_gid, month: x.month, count: Number(x.n) }));
+  }
+
+  async summary(projectGid?: string) {
+    const p: unknown[] = [];
+    const where = projectGid ? `WHERE asana_project_gid = $${p.push(projectGid)}` : "";
+    const r = await this.db.query<{ status: string; n: string }>(`SELECT status, COUNT(*) AS n FROM reviews ${where} GROUP BY status`, p);
     const by = Object.fromEntries(r.rows.map((x) => [x.status, Number(x.n)]));
     const m = await this.db.query<{ last_check: Date | null; last_notified: Date | null; failing: string | null }>(
       `SELECT MAX(last_checked_at) AS last_check, MAX(notification_sent_at) AS last_notified,
               SUM(CASE WHEN status='REVIEW_REMOVED' AND notification_sent=false AND last_notification_error IS NOT NULL THEN 1 ELSE 0 END) AS failing
-       FROM reviews`,
+       FROM reviews ${where}`,
+      p,
     );
     return {
       monitored: Object.values(by).reduce((a, b) => a + b, 0),
@@ -87,10 +121,31 @@ export class ReviewRepo {
     };
   }
 
-  async filterOptions() {
-    const loc = await this.db.query<{ v: string }>("SELECT DISTINCT location AS v FROM reviews WHERE location IS NOT NULL ORDER BY 1");
-    const mon = await this.db.query<{ v: string }>("SELECT DISTINCT month AS v FROM reviews WHERE month IS NOT NULL ORDER BY 1");
-    return { locations: loc.rows.map((x) => x.v), months: mon.rows.map((x) => x.v) };
+  /** Daily digest of check activity for the "Recent activity" feed, most recent day first. */
+  async recentActivity(opts: { days?: number; projectGid?: string } = {}): Promise<DayActivity[]> {
+    const days = opts.days ?? 14;
+    if (!Number.isInteger(days) || days <= 0) throw new Error("days must be a positive integer");
+    const p: unknown[] = [];
+    const proj = opts.projectGid ? `AND r.asana_project_gid = $${p.push(opts.projectGid)}` : "";
+    const r = await this.db.query<{ checked_at: Date; result: string; location: string | null; reviewer_name: string | null }>(
+      `SELECT h.checked_at, h.result, r.location, r.reviewer_name
+       FROM review_check_history h JOIN reviews r ON r.id = h.review_id
+       WHERE h.checked_at >= now() - INTERVAL '${days} days' ${proj}
+       ORDER BY h.checked_at DESC`,
+      p,
+    );
+    const byDay = new Map<string, DayActivity>();
+    for (const row of r.rows) {
+      const date = new Date(row.checked_at).toISOString().slice(0, 10);
+      const bucket = byDay.get(date) ?? { date, checked: 0, removed: 0, removedDetails: [] };
+      bucket.checked += 1;
+      if (row.result === "REVIEW_REMOVED") {
+        bucket.removed += 1;
+        bucket.removedDetails.push({ location: row.location, reviewerName: row.reviewer_name });
+      }
+      byDay.set(date, bucket);
+    }
+    return [...byDay.values()].sort((a, b) => (a.date < b.date ? 1 : -1));
   }
 
   async history(reviewId: number) {
@@ -133,6 +188,66 @@ export class ReviewRepo {
       await this.db.query(
         "UPDATE reviews SET status='UNKNOWN', last_checked_at=now(), last_error=$2, updated_at=now() WHERE id=$1",
         [review.id, reason],
+      );
+    }
+  }
+
+  async listByAsanaTaskIds(ids: string[]): Promise<ReviewRow[]> {
+    if (!ids.length) return [];
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
+    const r = await this.db.query<ReviewRow>(`SELECT * FROM reviews WHERE asana_task_id IN (${placeholders})`, ids);
+    return r.rows;
+  }
+
+  /** Takes reviews out of the daily automated cycle (used after an on-demand historical check). */
+  async setMonitoringActive(ids: number[], active: boolean): Promise<void> {
+    if (!ids.length) return;
+    const placeholders = ids.map((_, i) => `$${i + 2}`).join(",");
+    await this.db.query(`UPDATE reviews SET monitoring_active = $1, updated_at = now() WHERE id IN (${placeholders})`, [active, ...ids]);
+  }
+
+  /** Every "<Month> Managed Disputes <Year>" project seen so far, for the dashboard's month picker. */
+  async listAsanaProjects(): Promise<AsanaProjectRow[]> {
+    const r = await this.db.query<AsanaProjectRow>("SELECT * FROM asana_month_projects ORDER BY display_name");
+    return r.rows;
+  }
+
+  /** Records that a project exists, without touching its sync/run state if already known. */
+  async noteAsanaProjectSeen(projectGid: string, displayName: string): Promise<void> {
+    await this.db.query(
+      `INSERT INTO asana_month_projects (project_gid, display_name) VALUES ($1,$2)
+       ON CONFLICT (project_gid) DO UPDATE SET display_name = $2`,
+      [projectGid, displayName],
+    );
+  }
+
+  /**
+   * Claims this project for a run. Returns false if another run is already in progress for
+   * it (unless that run has been stuck for over `staleMinutes`, in which case it's reclaimed —
+   * guards against a crashed process leaving run_status stuck at 'running' forever).
+   */
+  async tryStartAsanaRun(projectGid: string, displayName: string, staleMinutes = 20): Promise<boolean> {
+    if (!Number.isInteger(staleMinutes) || staleMinutes <= 0) throw new Error("staleMinutes must be a positive integer");
+    await this.noteAsanaProjectSeen(projectGid, displayName);
+    const r = await this.db.query(
+      `UPDATE asana_month_projects SET run_status='running', last_run_error=NULL, updated_at=now()
+       WHERE project_gid=$1 AND (run_status <> 'running' OR updated_at < now() - INTERVAL '${staleMinutes} minutes')`,
+      [projectGid],
+    );
+    return (r.rowCount ?? 0) > 0;
+  }
+
+  async finishAsanaRun(projectGid: string, result: { ok: true; reviewCount: number } | { ok: false; error: string }): Promise<void> {
+    if (result.ok) {
+      await this.db.query(
+        `UPDATE asana_month_projects SET run_status='done', last_synced_at=now(), last_review_count=$2,
+           last_run_error=NULL, updated_at=now() WHERE project_gid=$1`,
+        [projectGid, result.reviewCount],
+      );
+    } else {
+      await this.db.query(
+        "UPDATE asana_month_projects SET run_status='failed', last_run_error=$2, updated_at=now() WHERE project_gid=$1",
+        [projectGid, result.error],
       );
     }
   }

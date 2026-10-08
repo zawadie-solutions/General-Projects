@@ -51,8 +51,20 @@ export function pickGoogleReviewUrl(notes: string | null | undefined, htmlNotes?
   return [...candidates].sort((a, b) => score(b) - score(a))[0]; // stable: keeps description order on ties
 }
 
+// "Mike Andrews : https://maps.app.goo.gl/..." — the name sits before the link.
+const NAME_BEFORE_URL_RE = /^\s*([^:\n/]{2,80}?)\s*:\s*https?:\/\//im;
+
 export function parseReviewerName(notes: string | null | undefined): string | null {
-  const m = (notes ?? "").match(/^\s*(?:reviewer(?:\s*name)?|review\s*author|author)\s*[:\-–]\s*(.+?)\s*$/im);
+  const text = notes ?? "";
+  const labelled = text.match(/^\s*(?:reviewer(?:\s*name)?|review\s*author|author)\s*[:\-–]\s*(.+?)\s*$/im);
+  if (labelled) return labelled[1].trim();
+  const beforeUrl = text.match(NAME_BEFORE_URL_RE);
+  return beforeUrl ? beforeUrl[1].trim() : null;
+}
+
+/** "Dispute 1: Google - Mike Andrews" -> "Mike Andrews"; null when the title has no " - Name" part. */
+export function parseReviewerFromTitle(title: string | null | undefined): string | null {
+  const m = (title ?? "").match(/\s-\s+([^-]+?)\s*$/);
   return m ? m[1].trim() : null;
 }
 
@@ -75,6 +87,7 @@ export function parseReviewText(notes: string | null | undefined): string | null
     : text
         .split("\n")
         .filter((l) => !/^\s*(?:reviewer(?:\s*name)?|review\s*author|author|rating|stars?)\s*[:\-–]/i.test(l))
+        .filter((l) => !NAME_BEFORE_URL_RE.test(l))
         .join("\n");
   const cleaned = body.replace(URL_RE, "").replace(/[ \t]+\n/g, "\n").trim();
   return cleaned ? cleaned.slice(0, 2000) : null;

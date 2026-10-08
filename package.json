@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "migrate": "tsx src/cli/migrate.ts",
     "discover": "tsx src/cli/discover.ts",
+    "check-month": "tsx src/cli/checkMonth.ts",
     "poc": "tsx src/cli/poc.ts",
     "dashboard": "tsx src/cli/dashboard.ts",
     "preview": "tsx src/cli/preview.ts",

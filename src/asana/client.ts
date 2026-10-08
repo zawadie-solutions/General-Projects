@@ -21,6 +21,12 @@ export interface AsanaSection {
   name: string;
 }
 
+export interface AsanaProject {
+  gid: string;
+  name: string;
+  archived?: boolean;
+}
+
 const BASE = "https://app.asana.com/api/1.0";
 const TASK_FIELDS = "name,notes,html_notes,completed,permalink_url,num_subtasks";
 
@@ -81,6 +87,29 @@ export class AsanaClient {
 
   subtasks(taskGid: string): Promise<AsanaTask[]> {
     return this.getAll(`/tasks/${taskGid}/subtasks`, { opt_fields: TASK_FIELDS });
+  }
+
+  async getProject(projectGid: string): Promise<AsanaProject> {
+    const r = await this.get<AsanaProject>(`/projects/${projectGid}`, { opt_fields: "name,archived" });
+    return r.data;
+  }
+
+  async projectWorkspace(projectGid: string): Promise<string> {
+    const r = await this.get<{ workspace?: { gid: string } }>(`/projects/${projectGid}`, { opt_fields: "workspace" });
+    const gid = r.data.workspace?.gid;
+    if (!gid) throw new AsanaError(`project ${projectGid} has no workspace`);
+    return gid;
+  }
+
+  /** Projects in the workspace whose name matches `query` (Asana's typeahead search). */
+  async searchProjects(workspaceGid: string, query: string): Promise<AsanaProject[]> {
+    const r = await this.get<AsanaProject[]>(`/workspaces/${workspaceGid}/typeahead`, {
+      resource_type: "project",
+      query,
+      opt_fields: "name,archived",
+      count: "100",
+    });
+    return r.data;
   }
 }
 
