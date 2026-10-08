@@ -257,6 +257,34 @@ describe("month scoping (for the dashboard's month filter / check-month)", () =>
     expect((await repo.removedReviews({})).length).toBe(2);
   });
 
+  it("locations/reviewsByLocation scope to the given project and location", async () => {
+    const { repo } = await twoMonths();
+    await repo.upsertDiscovered(review({ asanaTaskId: "o2", asanaProjectGid: "proj-oct", location: "Location B", reviewerName: "B Reviewer" }));
+    await repo.upsertDiscovered(review({ asanaTaskId: "o3", asanaProjectGid: "proj-oct", location: null, reviewerName: "Nowhere" }));
+    const locs = await repo.locations("proj-oct");
+    expect(locs.find((l) => l.location === "Location B")?.count).toBe(1);
+    expect(locs.find((l) => l.location === null)?.count).toBe(1);
+    expect((await repo.locations("proj-sep")).some((l) => l.location === "Location B")).toBe(false);
+    expect((await repo.reviewsByLocation({ projectGid: "proj-oct", location: "Location B" })).map((r) => r.reviewer_name)).toEqual(["B Reviewer"]);
+    expect((await repo.reviewsByLocation({ projectGid: "proj-oct", location: null })).map((r) => r.reviewer_name)).toEqual(["Nowhere"]);
+    expect(await repo.reviewsByLocation({ projectGid: "proj-sep", location: "Location B" })).toEqual([]);
+  });
+
+  it("clearInterruptedRuns frees projects left 'running' by a restart, and only those", async () => {
+    const { repo } = await makeRepo();
+    await repo.tryStartAsanaRun("proj-stuck", "Stuck");
+    await repo.tryStartAsanaRun("proj-done", "Done");
+    await repo.finishAsanaRun("proj-done", { ok: true, reviewCount: 3 });
+    expect(await repo.clearInterruptedRuns()).toBe(1);
+    const byGid = new Map((await repo.listAsanaProjects()).map((p) => [p.project_gid, p]));
+    expect(byGid.get("proj-stuck")?.run_status).toBe("failed");
+    expect(byGid.get("proj-stuck")?.last_run_error).toContain("interrupted");
+    expect(byGid.get("proj-done")?.run_status).toBe("done");
+    expect(await repo.tryStartAsanaRun("proj-stuck", "Stuck")).toBe(true);
+    expect(await repo.clearInterruptedRuns()).toBe(1);
+    expect(await repo.clearInterruptedRuns()).toBe(0);
+  });
+
   it("listByAsanaTaskIds finds only the requested tasks, and setMonitoringActive retires them", async () => {
     const { repo, sepRow, octRow } = await twoMonths();
     const found = await repo.listByAsanaTaskIds(["s1"]);

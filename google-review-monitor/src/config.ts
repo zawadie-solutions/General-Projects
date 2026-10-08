@@ -46,6 +46,9 @@ export const config = {
     refreshToken: required("GOOGLE_OAUTH_REFRESH_TOKEN"),
     locationsFile: env.GBP_LOCATIONS_FILE ?? "config/locations.json",
   }),
+  /** "business-profile" (default, OAuth) or "places" (Places API key). */
+  reviewChecker: env.REVIEW_CHECKER ?? "business-profile",
+  places: () => ({ apiKey: required("GOOGLE_PLACES_API_KEY") }),
   email: () => ({
     host: required("SMTP_HOST"),
     port: int(env.SMTP_PORT, 587),

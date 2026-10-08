@@ -1,6 +1,7 @@
 import { AsanaClient } from "../asana/client";
 import { config } from "../config";
 import type { ReviewRepo } from "../db/repo";
+import { PlacesChecker } from "../google/placesChecker";
 import { logger } from "../logger";
 import { buildChecker, buildNotifier } from "../wiring";
 import { createApp, type MonthRunnerOpts } from "./app";
@@ -24,7 +25,18 @@ function buildMonthRunner(): MonthRunnerOpts | undefined {
   }
 }
 
-export function startDashboard(repo: ReviewRepo) {
+function buildPlaceReviewsLoader() {
+  try {
+    const places = new PlacesChecker(config.places());
+    return (location: string, reviewUrls: string[]) => places.placeReviews(location, reviewUrls);
+  } catch {
+    return undefined; // no Places API key: the dashboard says so when the button is used
+  }
+}
+
+export async function startDashboard(repo: ReviewRepo) {
+  const cleared = await repo.clearInterruptedRuns();
+  if (cleared) logger.warn({ cleared }, "cleared runs left marked as running by a previous shutdown");
   createApp({
     repo,
     user: config.dashboardUser,
@@ -32,5 +44,6 @@ export function startDashboard(repo: ReviewRepo) {
     scheduleCron: config.scheduleCron,
     timezone: config.timezone,
     monthRunner: buildMonthRunner(),
+    loadPlaceReviews: buildPlaceReviewsLoader(),
   }).listen(config.port, () => logger.info({ port: config.port }, "dashboard listening"));
 }

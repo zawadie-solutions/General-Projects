@@ -27,5 +27,7 @@ To look back at an older month on demand (e.g. "did that review from two months 
 ## Limits
 Uses the Google Business Profile API, which only works for locations the authorised Google account manages, and matches by reviewer display name (Asana has no review ID). A renamed reviewer could look removed. Not yet verified against live Google/Asana — only mocked tests (`npm test`). Pilot against manual checks first. Run a single instance. If an email is sent but the DB write then fails, a duplicate is possible.
 
+Set `REVIEW_CHECKER=places` and `GOOGLE_PLACES_API_KEY` to check with the Places API (New) instead: no access to the business profile needed, the place is found from the Asana location name and confirmed against the CID in the review link, and the review is matched by its ID or reviewer name. Places returns at most 5 reviews per place, so a review it does not return is `UNKNOWN` unless the place has no more reviews than were returned.
+
 ## Layout
 `src/asana` sync · `src/google` checker (swap behind `ReviewChecker`) · `src/notify` Slack DM / email (swap behind `Notifier`) · `src/monitor/cycle.ts` the daily job · `src/db` schema + repo · `src/index.ts` scheduler

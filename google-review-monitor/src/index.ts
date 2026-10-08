@@ -15,4 +15,4 @@ cron.schedule(config.scheduleCron, () => void runCycle(deps).catch((e) => logger
 });
 logger.info({ schedule: config.scheduleCron, timezone: config.timezone }, "review monitor scheduled");
 
-startDashboard(repo);
+await startDashboard(repo);

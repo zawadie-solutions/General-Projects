@@ -4,12 +4,15 @@ import { config } from "./config";
 import { createDb } from "./db/db";
 import { ReviewRepo } from "./db/repo";
 import { BusinessProfileChecker, loadLocationMap, OAuthRefreshTokenProvider } from "./google/businessProfileChecker";
+import { PlacesChecker } from "./google/placesChecker";
 import type { CycleDeps } from "./monitor/cycle";
 import { EmailNotifier } from "./notify/email";
 import { SlackDmNotifier } from "./notify/slack";
-import type { Notifier } from "./types";
+import type { Notifier, ReviewChecker } from "./types";
 
-export function buildChecker() {
+export function buildChecker(): ReviewChecker {
+  if (config.reviewChecker === "places") return new PlacesChecker(config.places());
+  if (config.reviewChecker !== "business-profile") throw new Error(`Invalid REVIEW_CHECKER: ${config.reviewChecker}`);
   const g = config.google();
   return new BusinessProfileChecker({
     auth: new OAuthRefreshTokenProvider(g),

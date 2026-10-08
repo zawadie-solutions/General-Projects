@@ -52,7 +52,7 @@ interface GbpReview {
   reviewer?: { displayName?: string; isAnonymous?: boolean };
 }
 
-const norm = (s: string) =>
+export const norm = (s: string) =>
   s
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")

@@ -99,6 +99,26 @@ export class ReviewRepo {
     return r.rows.map((x) => ({ projectGid: x.asana_project_gid, month: x.month, count: Number(x.n) }));
   }
 
+  /** Locations with reviews, alphabetical — the dashboard's location picker options. */
+  async locations(projectGid?: string): Promise<{ location: string | null; count: number }[]> {
+    const p: unknown[] = [];
+    const where = projectGid ? `WHERE asana_project_gid = $${p.push(projectGid)}` : "";
+    const r = await this.db.query<{ location: string | null; n: string }>(
+      `SELECT location, COUNT(*) AS n FROM reviews ${where} GROUP BY location ORDER BY location`,
+      p,
+    );
+    return r.rows.map((x) => ({ location: x.location, count: Number(x.n) }));
+  }
+
+  /** Every review of one location (null = reviews with no location), in Asana order. */
+  async reviewsByLocation(opts: { projectGid?: string; location: string | null }): Promise<ReviewRow[]> {
+    const p: unknown[] = [];
+    const loc = opts.location === null ? "location IS NULL" : `location = $${p.push(opts.location)}`;
+    const proj = opts.projectGid ? `AND asana_project_gid = $${p.push(opts.projectGid)}` : "";
+    const r = await this.db.query<ReviewRow>(`SELECT * FROM reviews WHERE ${loc} ${proj} ORDER BY id`, p);
+    return r.rows;
+  }
+
   async summary(projectGid?: string) {
     const p: unknown[] = [];
     const where = projectGid ? `WHERE asana_project_gid = $${p.push(projectGid)}` : "";
@@ -235,6 +255,20 @@ export class ReviewRepo {
       [projectGid],
     );
     return (r.rowCount ?? 0) > 0;
+  }
+
+  /**
+   * Runs live inside the server process, so any project still marked 'running' when the
+   * server starts was cut off by a restart. Marks those failed so the dashboard's Run button
+   * is usable again. Returns how many were cleared.
+   */
+  async clearInterruptedRuns(): Promise<number> {
+    const r = await this.db.query(
+      `UPDATE asana_month_projects SET run_status='failed',
+         last_run_error='interrupted: the app was restarted before the check finished', updated_at=now()
+       WHERE run_status='running'`,
+    );
+    return r.rowCount ?? 0;
   }
 
   async finishAsanaRun(projectGid: string, result: { ok: true; reviewCount: number } | { ok: false; error: string }): Promise<void> {
