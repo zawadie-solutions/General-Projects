@@ -1,4 +1,4 @@
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { Link, NavLink } from 'react-router-dom'
 import { Flame, LogOut } from 'lucide-react'
 import { useProgress } from '../store/progress'
 import { useAuth } from '../store/auth'
@@ -14,13 +14,10 @@ const navLinkClass = ({ isActive }: { isActive: boolean }) =>
 export function NavBar() {
   const { points, streak } = useProgress()
   const { user, signOut } = useAuth()
-  const navigate = useNavigate()
 
-  async function handleSignOut() {
-    await signOut()
-    navigate('/')
-  }
-
+  // No signed-in identity — normally only reachable by opening this app
+  // directly instead of through the Zawadie Hub, which is the one sign-in
+  // for every solution (see api/_lib/auth.ts).
   if (!user) {
     return (
       <header>
@@ -28,20 +25,12 @@ export function NavBar() {
           <Link to="/">
             <Logo />
           </Link>
-          <div className="flex items-center gap-2.5">
-            <Link
-              to="/signin"
-              className="rounded-control px-4 py-2.5 text-sm font-bold text-text hover:text-accent"
-            >
-              Sign in
-            </Link>
-            <Link
-              to="/signup"
-              className="rounded-control bg-accent px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-accent-hover"
-            >
-              Create account
-            </Link>
-          </div>
+          <a
+            href="/"
+            className="rounded-control bg-accent px-5 py-2.5 text-sm font-bold text-white transition-colors hover:bg-accent-hover"
+          >
+            Go to the Zawadie Hub
+          </a>
         </div>
       </header>
     )
@@ -90,7 +79,7 @@ export function NavBar() {
           </div>
           <button
             type="button"
-            onClick={handleSignOut}
+            onClick={signOut}
             className="flex items-center gap-1 text-[13px] font-semibold text-text-softer hover:text-accent"
           >
             <LogOut className="h-3.5 w-3.5" />

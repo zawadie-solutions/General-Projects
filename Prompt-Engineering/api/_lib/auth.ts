@@ -1,28 +1,14 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { getSql } from './db.js'
 
 const SESSION_COOKIE = 'pe_session'
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30 // 30 days
 
-export const ALLOWED_EMAIL_DOMAIN = 'zawadie.com'
-
-export function isAllowedEmail(email: string) {
-  return email.trim().toLowerCase().endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)
-}
-
-export function hashPassword(password: string) {
-  const salt = randomBytes(16).toString('hex')
-  const hash = scryptSync(password, salt, 64).toString('hex')
-  return { hash, salt }
-}
-
-export function verifyPassword(password: string, salt: string, hash: string) {
-  const candidate = scryptSync(password, salt, 64)
-  const stored = Buffer.from(hash, 'hex')
-  if (candidate.length !== stored.length) return false
-  return timingSafeEqual(candidate, stored)
-}
+// Shared with the Zawadie Hub (hub-server/data/sso-secret.txt) so this app
+// trusts a login that already happened there instead of running its own.
+const SSO_SECRET = process.env.ZAWADIE_SSO_SECRET || ''
+const MAX_SKEW_MS = 5 * 60 * 1000
 
 function parseCookies(header?: string | null): Record<string, string> {
   const out: Record<string, string> = {}
@@ -35,25 +21,8 @@ function parseCookies(header?: string | null): Record<string, string> {
   return out
 }
 
-export function setSessionCookie(res: VercelResponse, token: string) {
-  const maxAge = Math.floor(SESSION_TTL_MS / 1000)
-  const secure = process.env.NODE_ENV === 'production' ? ' Secure;' : ''
-  res.setHeader(
-    'Set-Cookie',
-    `${SESSION_COOKIE}=${token}; HttpOnly;${secure} Path=/; Max-Age=${maxAge}; SameSite=Lax`,
-  )
-}
-
 export function clearSessionCookie(res: VercelResponse) {
   res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax`)
-}
-
-export async function createSession(userId: number) {
-  const sql = getSql()
-  const token = randomBytes(32).toString('hex')
-  const expiresAt = new Date(Date.now() + SESSION_TTL_MS)
-  await sql`INSERT INTO sessions (token, user_id, expires_at) VALUES (${token}, ${userId}, ${expiresAt})`
-  return token
 }
 
 export async function destroySession(req: VercelRequest) {
@@ -69,7 +38,58 @@ export interface SessionUser {
   display_name: string
 }
 
+function verifyHubHeaders(req: VercelRequest): { email: string } | null {
+  if (!SSO_SECRET) return null
+  const email = req.headers['x-zawadie-user-email']
+  const role = req.headers['x-zawadie-user-role']
+  const ts = req.headers['x-zawadie-user-ts']
+  const sig = req.headers['x-zawadie-user-sig']
+  if (typeof email !== 'string' || typeof role !== 'string' || typeof ts !== 'string' || typeof sig !== 'string') {
+    return null
+  }
+  if (Math.abs(Date.now() - Number(ts)) > MAX_SKEW_MS) return null
+
+  const expected = createHmac('sha256', SSO_SECRET).update(`${email}|${role}|${ts}`).digest('hex')
+  const sigBuf = Buffer.from(sig, 'hex')
+  const expBuf = Buffer.from(expected, 'hex')
+  if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) return null
+
+  return { email: email.toLowerCase() }
+}
+
+function displayNameFromEmail(email: string) {
+  return email
+    .split('@')[0]
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+// Finds the account for a hub-verified email, creating one on first sight.
+// Reuses any row already created back when this app had its own signup, so
+// existing progress/leaderboard history for that email carries forward.
+async function getOrCreateHubUser(email: string): Promise<SessionUser> {
+  const sql = getSql()
+  const existing = (await sql`SELECT id, email, display_name FROM users WHERE email = ${email}`) as SessionUser[]
+  if (existing[0]) return existing[0]
+
+  const inserted = (await sql`
+    INSERT INTO users (email, display_name)
+    VALUES (${email}, ${displayNameFromEmail(email)})
+    ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
+    RETURNING id, email, display_name
+  `) as SessionUser[]
+  return inserted[0]
+}
+
 export async function getUserFromRequest(req: VercelRequest): Promise<SessionUser | null> {
+  const hubUser = verifyHubHeaders(req)
+  if (hubUser) return getOrCreateHubUser(hubUser.email)
+
+  // Fallback for direct/standalone access without the hub (e.g. local dev
+  // before ZAWADIE_SSO_SECRET is set) — only reachable by a session cookie
+  // issued before self-signup was removed in favor of hub-only access.
   const token = parseCookies(req.headers.cookie).pe_session
   if (!token) return null
   const sql = getSql()

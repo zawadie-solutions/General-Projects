@@ -4,10 +4,16 @@ CREATE TABLE IF NOT EXISTS users (
   id SERIAL PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   display_name TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
-  password_salt TEXT NOT NULL,
+  password_hash TEXT,
+  password_salt TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Accounts are now provisioned from the Zawadie Hub's login (no more local
+-- signup), so new rows have no password at all. Relax the old NOT NULL
+-- constraints in place rather than losing existing accounts.
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+ALTER TABLE users ALTER COLUMN password_salt DROP NOT NULL;
 
 -- Earlier versions of this schema used a bare `username` column;
 -- migrate it in place instead of losing existing accounts.

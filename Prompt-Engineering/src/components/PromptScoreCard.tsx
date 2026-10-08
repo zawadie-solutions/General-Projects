@@ -16,7 +16,7 @@ export function PromptScoreCard({ evaluation }: { evaluation: PromptEvaluation }
         <div
           className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full"
           style={{
-            background: `conic-gradient(#22A67A ${evaluation.score}%, #f0ebe3 0)`,
+            background: `conic-gradient(#1DB881 ${evaluation.score}%, #F1F5F9 0)`,
           }}
         >
           <div className="flex h-[76px] w-[76px] items-center justify-center rounded-full bg-surface font-display text-lg font-bold text-text">

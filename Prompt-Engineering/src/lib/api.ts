@@ -18,8 +18,12 @@ export interface LeaderboardEntry {
   points: number
 }
 
+// BASE_URL carries whatever `base` vite.config.ts is configured with
+// ('/prompt-engineering/' behind the hub, '/' when run standalone).
+const API_ROOT = `${import.meta.env.BASE_URL}api`.replace(/\/+/g, '/')
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_ROOT}${path}`, {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     ...options,
@@ -32,16 +36,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  signUp: (body: { email: string; displayName: string; password: string }) =>
-    request<{ user: AuthUser }>('/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  signIn: (body: { email: string; password: string }) =>
-    request<{ user: AuthUser; progress: RemoteProgress | null }>('/auth/signin', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+  // Clears this app's own fallback session cookie, if any — the real
+  // sign-out is the hub's (see store/auth.tsx signOut).
   signOut: () => request<{ ok: true }>('/auth/signout', { method: 'POST' }),
   me: () => request<{ user: AuthUser | null; progress: RemoteProgress | null }>('/auth/me'),
   leaderboard: () => request<{ entries: LeaderboardEntry[] }>('/leaderboard'),

@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { MODULES, totalLessonCount } from '../data/modules'
 import { moduleItems } from '../lib/moduleProgress'
 import { Button } from '../components/Button'
+import { useAuth } from '../store/auth'
 
 const FEATURES = [
   {
@@ -32,6 +33,7 @@ const FEATURES = [
 
 export function Landing() {
   const totalLessons = totalLessonCount()
+  const { user, loading } = useAuth()
 
   return (
     <div className="mx-auto max-w-[1120px] px-6 pb-24 pt-16 sm:px-12">
@@ -47,18 +49,23 @@ export function Landing() {
             A hands-on course for Zawadie agents — six modules, real exercises, a prompt
             evaluation tool, and a final exam that earns you a certificate.
           </p>
-          <div className="flex flex-wrap gap-3.5">
-            <Link to="/signup">
-              <Button className="px-6 py-3.5 text-base">Create your account</Button>
-            </Link>
-            <Link to="/signin">
-              <Button variant="secondary" className="px-6 py-3.5 text-base">
-                Sign in
-              </Button>
-            </Link>
-          </div>
+          {!loading && (
+            <div className="flex flex-wrap gap-3.5">
+              {user ? (
+                <Link to="/dashboard">
+                  <Button className="px-6 py-3.5 text-base">Go to your dashboard</Button>
+                </Link>
+              ) : (
+                <a href="/">
+                  <Button className="px-6 py-3.5 text-base">Go to the Zawadie Hub</Button>
+                </a>
+              )}
+            </div>
+          )}
           <p className="mt-4 text-[13px] text-text-softer">
-            Only available to Zawadie Solutions team members with a @zawadie.com email.
+            {user
+              ? `Signed in as ${user.email}. Your progress is saved automatically.`
+              : 'Open this course through the Zawadie Hub — that’s where every employee signs in once to reach every solution they’ve been given access to.'}
           </p>
         </div>
 

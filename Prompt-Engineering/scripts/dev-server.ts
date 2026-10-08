@@ -1,7 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import signup from '../api/auth/signup'
-import signin from '../api/auth/signin'
 import signout from '../api/auth/signout'
 import me from '../api/auth/me'
 import leaderboard from '../api/leaderboard'
@@ -10,8 +8,6 @@ import progress from '../api/progress'
 type Handler = (req: VercelRequest, res: VercelResponse) => unknown
 
 const routes: Record<string, Handler> = {
-  '/api/auth/signup': signup,
-  '/api/auth/signin': signin,
   '/api/auth/signout': signout,
   '/api/auth/me': me,
   '/api/leaderboard': leaderboard,

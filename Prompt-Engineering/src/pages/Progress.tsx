@@ -27,7 +27,7 @@ export function Progress() {
         <div className="flex items-center gap-7 rounded-card border border-border bg-surface p-7">
           <div
             className="flex h-[100px] w-[100px] shrink-0 items-center justify-center rounded-full"
-            style={{ background: `conic-gradient(#22A67A ${overallPct}%, #f0ebe3 0)` }}
+            style={{ background: `conic-gradient(#1DB881 ${overallPct}%, #F1F5F9 0)` }}
           >
             <div className="flex h-[76px] w-[76px] items-center justify-center rounded-full bg-surface font-display text-[19px] font-bold text-text">
               {overallPct}%
@@ -49,7 +49,7 @@ export function Progress() {
           <div
             className="flex h-[100px] w-[100px] shrink-0 items-center justify-center rounded-full"
             style={{
-              background: `conic-gradient(${totalScorePct >= 80 ? '#22A67A' : '#F2A93B'} ${totalScorePct}%, #f0ebe3 0)`,
+              background: `conic-gradient(${totalScorePct >= 80 ? '#1DB881' : '#EBB019'} ${totalScorePct}%, #F1F5F9 0)`,
             }}
           >
             <div className="flex h-[76px] w-[76px] items-center justify-center rounded-full bg-surface font-display text-[19px] font-bold text-text">

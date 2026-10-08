@@ -6,8 +6,6 @@ import App from './App.tsx'
 import { ProgressProvider } from './store/progress'
 import { AuthProvider } from './store/auth'
 import { Landing } from './pages/Landing'
-import { Signup } from './pages/Signup'
-import { Signin } from './pages/Signin'
 import { Dashboard } from './pages/Dashboard'
 import { Lesson } from './pages/Lesson'
 import { Progress } from './pages/Progress'
@@ -17,14 +15,12 @@ import { Leaderboard } from './pages/Leaderboard'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter>
+    <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
       <AuthProvider>
         <ProgressProvider>
           <Routes>
             <Route element={<App />}>
               <Route index element={<Landing />} />
-              <Route path="signup" element={<Signup />} />
-              <Route path="signin" element={<Signin />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="modules/:moduleId/lessons/:lessonId" element={<Lesson />} />
               <Route path="progress" element={<Progress />} />
