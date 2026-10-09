@@ -11,6 +11,7 @@ import { config } from "../config";
 import { createDb, migrate } from "../db/db";
 import { ReviewRepo } from "../db/repo";
 import { runMonthCheck } from "../monitor/runMonth";
+import { applyStored } from "../settings";
 import { buildChecker, buildNotifier } from "../wiring";
 
 const { values } = parseArgs({
@@ -24,6 +25,7 @@ if (!values.project) {
 const db = createDb();
 await migrate(db);
 const repo = new ReviewRepo(db);
+applyStored(await repo.getSettings());
 const a = config.asana();
 const client = new AsanaClient(a.token);
 const projectGid = values.project;

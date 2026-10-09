@@ -18,6 +18,16 @@ export interface AsanaProjectRow {
   updated_at: Date;
 }
 
+export interface AuditRow {
+  id: number;
+  at: Date;
+  /** The dashboard user, or "scheduler" / "system" for things the app did by itself. */
+  actor: string;
+  /** Machine key, grouped by prefix: run.*, location.*, google.*, settings.*, daily.*, system.* */
+  action: string;
+  summary: string;
+}
+
 export class ReviewRepo {
   constructor(private db: Db) {}
 
@@ -97,6 +107,26 @@ export class ReviewRepo {
        WHERE asana_project_gid IS NOT NULL GROUP BY asana_project_gid ORDER BY MAX(created_at) DESC`,
     );
     return r.rows.map((x) => ({ projectGid: x.asana_project_gid, month: x.month, count: Number(x.n) }));
+  }
+
+  /** Locations with reviews, alphabetical — the dashboard's location picker options. */
+  async locations(projectGid?: string): Promise<{ location: string | null; count: number }[]> {
+    const p: unknown[] = [];
+    const where = projectGid ? `WHERE asana_project_gid = $${p.push(projectGid)}` : "";
+    const r = await this.db.query<{ location: string | null; n: string }>(
+      `SELECT location, COUNT(*) AS n FROM reviews ${where} GROUP BY location ORDER BY location`,
+      p,
+    );
+    return r.rows.map((x) => ({ location: x.location, count: Number(x.n) }));
+  }
+
+  /** Every review of one location (null = reviews with no location), in Asana order. */
+  async reviewsByLocation(opts: { projectGid?: string; location: string | null }): Promise<ReviewRow[]> {
+    const p: unknown[] = [];
+    const loc = opts.location === null ? "location IS NULL" : `location = $${p.push(opts.location)}`;
+    const proj = opts.projectGid ? `AND asana_project_gid = $${p.push(opts.projectGid)}` : "";
+    const r = await this.db.query<ReviewRow>(`SELECT * FROM reviews WHERE ${loc} ${proj} ORDER BY id`, p);
+    return r.rows;
   }
 
   async summary(projectGid?: string) {
@@ -237,6 +267,20 @@ export class ReviewRepo {
     return (r.rowCount ?? 0) > 0;
   }
 
+  /**
+   * Runs live inside the server process, so any project still marked 'running' when the
+   * server starts was cut off by a restart. Marks those failed so the dashboard's Run button
+   * is usable again. Returns how many were cleared.
+   */
+  async clearInterruptedRuns(): Promise<number> {
+    const r = await this.db.query(
+      `UPDATE asana_month_projects SET run_status='failed',
+         last_run_error='interrupted: the app was restarted before the check finished', updated_at=now()
+       WHERE run_status='running'`,
+    );
+    return r.rowCount ?? 0;
+  }
+
   async finishAsanaRun(projectGid: string, result: { ok: true; reviewCount: number } | { ok: false; error: string }): Promise<void> {
     if (result.ok) {
       await this.db.query(
@@ -250,6 +294,49 @@ export class ReviewRepo {
         [projectGid, result.error],
       );
     }
+  }
+
+  /** Appends one line to the audit log. */
+  async addAudit(e: { actor: string; action: string; summary: string }): Promise<void> {
+    await this.db.query("INSERT INTO audit_log (actor, action, summary) VALUES ($1,$2,$3)", [e.actor, e.action, e.summary]);
+  }
+
+  /**
+   * Audit entries, newest first. `prefixes` keeps only actions starting with one of them
+   * (e.g. ["run.", "location."]); `beforeId` pages further back.
+   */
+  async listAudit(opts: { limit?: number; beforeId?: number; prefixes?: string[] } = {}): Promise<AuditRow[]> {
+    const p: unknown[] = [];
+    const where: string[] = [];
+    if (opts.beforeId) where.push(`id < $${p.push(opts.beforeId)}`);
+    if (opts.prefixes?.length) where.push(`(${opts.prefixes.map((x) => `action LIKE $${p.push(`${x}%`)}`).join(" OR ")})`);
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const r = await this.db.query<AuditRow>(
+      `SELECT id, at, actor, action, summary FROM audit_log ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY id DESC LIMIT $${p.push(limit)}`,
+      p,
+    );
+    return r.rows;
+  }
+
+  /** Settings saved from the dashboard (key -> value); empty when none were ever changed. */
+  async getSettings(): Promise<Record<string, string>> {
+    const r = await this.db.query<{ key: string; value: string }>("SELECT key, value FROM app_settings");
+    return Object.fromEntries(r.rows.map((x) => [x.key, x.value]));
+  }
+
+  async saveSettings(values: Record<string, string>, actor: string): Promise<void> {
+    for (const [key, value] of Object.entries(values)) {
+      await this.db.query(
+        `INSERT INTO app_settings (key, value, updated_by) VALUES ($1,$2,$3)
+         ON CONFLICT (key) DO UPDATE SET value = $2, updated_by = $3, updated_at = now()`,
+        [key, value, actor],
+      );
+    }
+  }
+
+  /** Forgets every dashboard-saved setting, so .env applies again. */
+  async clearSettings(): Promise<void> {
+    await this.db.query("DELETE FROM app_settings");
   }
 
   async pendingNotifications(): Promise<ReviewRow[]> {

@@ -20,6 +20,11 @@ export interface ReviewToCheck {
  */
 export interface ReviewChecker {
   checkReview(review: ReviewToCheck): Promise<CheckResult>;
+  /**
+   * Optional: told which reviews are about to be checked, so a queue-based source can request
+   * every place up front. Must not throw; `checkReview` has to work without it.
+   */
+  prepare?(reviews: ReviewToCheck[]): Promise<void>;
 }
 
 /** A review task discovered in Asana. */

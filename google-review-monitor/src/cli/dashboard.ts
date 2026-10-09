@@ -5,4 +5,4 @@ import { startDashboard } from "../server/start";
 
 const db = createDb();
 await migrate(db);
-startDashboard(new ReviewRepo(db));
+await startDashboard(new ReviewRepo(db));

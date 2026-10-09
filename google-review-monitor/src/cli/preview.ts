@@ -55,6 +55,20 @@ for (const [i, row] of historyRows.entries()) {
   if (daysAgo > 0) await db.query(`UPDATE review_check_history SET checked_at = now() - INTERVAL '${daysAgo} days' WHERE id = $1`, [row.id]);
 }
 
+// A few audit entries so the Audit page has something to show.
+for (const [actor, action, summary] of [
+  ["system", "system.interrupted", "App started and released 1 check that a restart had interrupted"],
+  ["demo", "settings.changed", "DataForSEO reviews per location changed from 200 to 500"],
+  ["demo", "run.started", "Started a check of October"],
+  ["demo", "run.finished", "Check of October finished: 4 reviews checked, 1 removed, 0 could not be checked; removal alert sent"],
+  ["demo", "location.checked", "Checked Location A: 1 review — 1 still available, 0 removed, 0 could not be checked"],
+  ["demo", "google.loaded", "Loaded the latest Google reviews for Location B"],
+  ["scheduler", "daily.started", "Daily check started"],
+  ["scheduler", "daily.finished", "Daily check finished"],
+]) {
+  await repo.addAudit({ actor, action, summary });
+}
+
 createApp({ repo, user: "demo", password: "demo", scheduleCron: "0 7 * * *", timezone: "Africa/Maputo" }).listen(3100, () =>
   console.log("Preview at http://localhost:3100  (login: demo / demo)"),
 );

@@ -47,3 +47,22 @@ CREATE TABLE IF NOT EXISTS asana_month_projects (
   last_run_error TEXT,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Who did what, and when: runs started/finished/cancelled, single-location checks, settings
+-- changes, and what the scheduler did. Shown on the dashboard's Audit page. Append-only.
+CREATE TABLE IF NOT EXISTS audit_log (
+  id BIGSERIAL PRIMARY KEY,
+  at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  summary TEXT NOT NULL
+);
+
+-- Settings changed from the dashboard's Configure page. A key present here overrides the
+-- value from .env. Deleting the row falls back to .env again.
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by TEXT
+);

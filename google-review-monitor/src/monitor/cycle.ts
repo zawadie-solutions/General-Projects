@@ -1,7 +1,7 @@
 import type { ReviewRepo } from "../db/repo";
 import { logger } from "../logger";
 import { notifyPending } from "../notify/service";
-import type { CheckResult, Notifier, ReviewChecker, ReviewRow } from "../types";
+import type { CheckResult, Notifier, ReviewChecker, ReviewRow, ReviewToCheck } from "../types";
 
 export interface CycleDeps {
   repo: ReviewRepo;
@@ -16,16 +16,27 @@ export interface CycleDeps {
 
 const sleep = (ms: number) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve());
 
+export const toCheck = (row: ReviewRow): ReviewToCheck => ({
+  id: row.id,
+  googleReviewUrl: row.google_review_url,
+  location: row.location,
+  reviewerName: row.reviewer_name,
+  rating: row.rating,
+});
+
+/** Lets a queue-based checker request every place before the first check; a failure here is not fatal. */
+export async function prepareChecker(checker: ReviewChecker, rows: ReviewRow[]): Promise<void> {
+  try {
+    await checker.prepare?.(rows.map(toCheck));
+  } catch (e) {
+    logger.warn({ err: (e as Error).message }, "checker prepare failed");
+  }
+}
+
 /** Run the checker without ever letting an exception turn into anything but UNKNOWN. */
 async function safeCheck(checker: ReviewChecker, row: ReviewRow): Promise<CheckResult> {
   try {
-    return await checker.checkReview({
-      id: row.id,
-      googleReviewUrl: row.google_review_url,
-      location: row.location,
-      reviewerName: row.reviewer_name,
-      rating: row.rating,
-    });
+    return await checker.checkReview(toCheck(row));
   } catch (e) {
     return { status: "UNKNOWN", reason: `checker threw: ${(e as Error).message}` };
   }
@@ -57,7 +68,9 @@ export interface CheckSummary {
 
 export async function checkAll(deps: CycleDeps): Promise<CheckSummary> {
   const s: CheckSummary = { checked: 0, exists: 0, removed: 0, unknown: 0 };
-  for (const row of await deps.repo.listToCheck()) {
+  const rows = await deps.repo.listToCheck();
+  await prepareChecker(deps.checker, rows);
+  for (const row of rows) {
     const result = await checkWithConfirmation(deps, row);
     try {
       await deps.repo.recordCheck(row, result);

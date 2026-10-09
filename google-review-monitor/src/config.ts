@@ -46,6 +46,26 @@ export const config = {
     refreshToken: required("GOOGLE_OAUTH_REFRESH_TOKEN"),
     locationsFile: env.GBP_LOCATIONS_FILE ?? "config/locations.json",
   }),
+  /** "business-profile" (default, OAuth), "places" (Places API key), "apify" (Apify token) or "dataforseo". */
+  reviewChecker: env.REVIEW_CHECKER ?? "business-profile",
+  /** Optional second source, asked only when the first one fails (out of credit, refused, unreachable). */
+  reviewCheckerFallback: env.REVIEW_CHECKER_FALLBACK || undefined,
+  places: () => ({ apiKey: required("GOOGLE_PLACES_API_KEY") }),
+  /** maxReviews: newest reviews scraped per place (0 = all). Apify bills per review scraped. */
+  apifyMaxReviews: int(env.APIFY_MAX_REVIEWS, 1000),
+  apify: () => ({ token: required("APIFY_TOKEN"), maxReviews: config.apifyMaxReviews }),
+  /**
+   * maxReviews: newest reviews listed per place (0 = DataForSEO's limit of 4,490); billed per 10.
+   * priority: use the priority queue (about a minute, double the price) for every check.
+   */
+  dataforseoMaxReviews: int(env.DATAFORSEO_MAX_REVIEWS, 200),
+  dataforseoPriority: bool(env.DATAFORSEO_PRIORITY, false),
+  dataforseo: () => ({
+    login: required("DATAFORSEO_LOGIN"),
+    password: required("DATAFORSEO_PASSWORD"),
+    maxReviews: config.dataforseoMaxReviews,
+    priority: config.dataforseoPriority,
+  }),
   email: () => ({
     host: required("SMTP_HOST"),
     port: int(env.SMTP_PORT, 587),
