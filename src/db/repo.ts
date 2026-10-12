@@ -23,13 +23,13 @@ export class ReviewRepo {
 
   /** Insert a new review or refresh Asana metadata. Returns true if newly created. */
   async upsertDiscovered(d: DiscoveredReview): Promise<boolean> {
-    const existing = await this.db.query<ReviewRow>("SELECT * FROM reviews WHERE asana_task_id = $1", [d.asanaTaskId]);
+    const existing = await this.db.query<ReviewRow>("SELECT * FROM reviews WHERE asana_task_id = ?", [d.asanaTaskId]);
     const row = existing.rows[0];
     if (!row) {
       await this.db.query(
         `INSERT INTO reviews (asana_task_id, asana_task_name, asana_task_url, asana_project_gid, location, month,
            reviewer_name, rating, review_text, google_review_url)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [
           d.asanaTaskId,
           d.asanaTaskName,
@@ -48,12 +48,11 @@ export class ReviewRepo {
     // If the link was replaced the old verdict no longer applies: start over.
     const urlChanged = row.google_review_url !== d.googleReviewUrl;
     await this.db.query(
-      `UPDATE reviews SET asana_task_name=$2, asana_task_url=$3, asana_project_gid=$4, location=$5, month=$6, reviewer_name=$7,
-         rating=$8, google_review_url=$9, review_text=$10, updated_at=now()
+      `UPDATE reviews SET asana_task_name=?, asana_task_url=?, asana_project_gid=?, location=?, month=?, reviewer_name=?,
+         rating=?, google_review_url=?, review_text=?, updated_at=now()
          ${urlChanged ? ", status='UNKNOWN', removed_at=NULL, notification_sent=false, notification_sent_at=NULL, monitoring_active=true, last_error=NULL" : ""}
-       WHERE id=$1`,
+       WHERE id=?`,
       [
-        row.id,
         d.asanaTaskName,
         d.asanaTaskUrl,
         d.asanaProjectGid,
@@ -63,6 +62,7 @@ export class ReviewRepo {
         d.rating,
         d.googleReviewUrl,
         d.reviewText,
+        row.id,
       ],
     );
     return false;
@@ -81,10 +81,15 @@ export class ReviewRepo {
   /** Reviews currently flagged as removed, most recent first — what the dashboard needs attention on. */
   async removedReviews(opts: { projectGid?: string; limit?: number } = {}): Promise<ReviewRow[]> {
     const p: unknown[] = [];
-    const proj = opts.projectGid ? `AND asana_project_gid = $${p.push(opts.projectGid)}` : "";
-    const limit = opts.limit ?? 100;
+    let proj = "";
+    if (opts.projectGid) {
+      proj = "AND asana_project_gid = ?";
+      p.push(opts.projectGid);
+    }
+    p.push(opts.limit ?? 100);
     const r = await this.db.query<ReviewRow>(
-      `SELECT * FROM reviews WHERE status='REVIEW_REMOVED' ${proj} ORDER BY removed_at DESC NULLS LAST, id DESC LIMIT $${p.push(limit)}`,
+      `SELECT * FROM reviews WHERE status='REVIEW_REMOVED' ${proj}
+       ORDER BY removed_at IS NULL, removed_at DESC, id DESC LIMIT ?`,
       p,
     );
     return r.rows;
@@ -102,7 +107,11 @@ export class ReviewRepo {
   /** Locations with reviews, alphabetical — the dashboard's location picker options. */
   async locations(projectGid?: string): Promise<{ location: string | null; count: number }[]> {
     const p: unknown[] = [];
-    const where = projectGid ? `WHERE asana_project_gid = $${p.push(projectGid)}` : "";
+    let where = "";
+    if (projectGid) {
+      where = "WHERE asana_project_gid = ?";
+      p.push(projectGid);
+    }
     const r = await this.db.query<{ location: string | null; n: string }>(
       `SELECT location, COUNT(*) AS n FROM reviews ${where} GROUP BY location ORDER BY location`,
       p,
@@ -113,15 +122,29 @@ export class ReviewRepo {
   /** Every review of one location (null = reviews with no location), in Asana order. */
   async reviewsByLocation(opts: { projectGid?: string; location: string | null }): Promise<ReviewRow[]> {
     const p: unknown[] = [];
-    const loc = opts.location === null ? "location IS NULL" : `location = $${p.push(opts.location)}`;
-    const proj = opts.projectGid ? `AND asana_project_gid = $${p.push(opts.projectGid)}` : "";
+    let loc: string;
+    if (opts.location === null) {
+      loc = "location IS NULL";
+    } else {
+      loc = "location = ?";
+      p.push(opts.location);
+    }
+    let proj = "";
+    if (opts.projectGid) {
+      proj = "AND asana_project_gid = ?";
+      p.push(opts.projectGid);
+    }
     const r = await this.db.query<ReviewRow>(`SELECT * FROM reviews WHERE ${loc} ${proj} ORDER BY id`, p);
     return r.rows;
   }
 
   async summary(projectGid?: string) {
     const p: unknown[] = [];
-    const where = projectGid ? `WHERE asana_project_gid = $${p.push(projectGid)}` : "";
+    let where = "";
+    if (projectGid) {
+      where = "WHERE asana_project_gid = ?";
+      p.push(projectGid);
+    }
     const r = await this.db.query<{ status: string; n: string }>(`SELECT status, COUNT(*) AS n FROM reviews ${where} GROUP BY status`, p);
     const by = Object.fromEntries(r.rows.map((x) => [x.status, Number(x.n)]));
     const m = await this.db.query<{ last_check: Date | null; last_notified: Date | null; failing: string | null }>(
@@ -146,11 +169,15 @@ export class ReviewRepo {
     const days = opts.days ?? 14;
     if (!Number.isInteger(days) || days <= 0) throw new Error("days must be a positive integer");
     const p: unknown[] = [];
-    const proj = opts.projectGid ? `AND r.asana_project_gid = $${p.push(opts.projectGid)}` : "";
+    let proj = "";
+    if (opts.projectGid) {
+      proj = "AND r.asana_project_gid = ?";
+      p.push(opts.projectGid);
+    }
     const r = await this.db.query<{ checked_at: Date; result: string; location: string | null; reviewer_name: string | null }>(
       `SELECT h.checked_at, h.result, r.location, r.reviewer_name
        FROM review_check_history h JOIN reviews r ON r.id = h.review_id
-       WHERE h.checked_at >= now() - INTERVAL '${days} days' ${proj}
+       WHERE h.checked_at >= DATE_SUB(NOW(), INTERVAL ${days} DAY) ${proj}
        ORDER BY h.checked_at DESC`,
       p,
     );
@@ -169,7 +196,7 @@ export class ReviewRepo {
   }
 
   async history(reviewId: number) {
-    const r = await this.db.query("SELECT checked_at, result, reason FROM review_check_history WHERE review_id=$1 ORDER BY id", [
+    const r = await this.db.query("SELECT checked_at, result, reason FROM review_check_history WHERE review_id=? ORDER BY id", [
       reviewId,
     ]);
     return r.rows;
@@ -182,7 +209,7 @@ export class ReviewRepo {
    */
   async recordCheck(review: ReviewRow, result: CheckResult): Promise<void> {
     const reason = result.status === "UNKNOWN" ? result.reason : null;
-    await this.db.query("INSERT INTO review_check_history (review_id, result, reason) VALUES ($1,$2,$3)", [
+    await this.db.query("INSERT INTO review_check_history (review_id, result, reason) VALUES (?,?,?)", [
       review.id,
       result.status,
       reason,
@@ -190,31 +217,31 @@ export class ReviewRepo {
     if (result.status === "REVIEW_EXISTS") {
       await this.db.query(
         `UPDATE reviews SET status='REVIEW_EXISTS', last_checked_at=now(), last_error=NULL, removed_at=NULL,
-           notification_sent=false, notification_sent_at=NULL, monitoring_active=true, updated_at=now() WHERE id=$1`,
+           notification_sent=false, notification_sent_at=NULL, monitoring_active=true, updated_at=now() WHERE id=?`,
         [review.id],
       );
     } else if (result.status === "REVIEW_REMOVED") {
       await this.db.query(
         `UPDATE reviews SET status='REVIEW_REMOVED', last_checked_at=now(), last_error=NULL,
-           removed_at=COALESCE(removed_at, now()), updated_at=now() WHERE id=$1`,
+           removed_at=COALESCE(removed_at, now()), updated_at=now() WHERE id=?`,
         [review.id],
       );
     } else if (review.status === "REVIEW_REMOVED") {
-      await this.db.query("UPDATE reviews SET last_checked_at=now(), last_error=$2, updated_at=now() WHERE id=$1", [
-        review.id,
+      await this.db.query("UPDATE reviews SET last_checked_at=now(), last_error=?, updated_at=now() WHERE id=?", [
         reason,
+        review.id,
       ]);
     } else {
       await this.db.query(
-        "UPDATE reviews SET status='UNKNOWN', last_checked_at=now(), last_error=$2, updated_at=now() WHERE id=$1",
-        [review.id, reason],
+        "UPDATE reviews SET status='UNKNOWN', last_checked_at=now(), last_error=?, updated_at=now() WHERE id=?",
+        [reason, review.id],
       );
     }
   }
 
   async listByAsanaTaskIds(ids: string[]): Promise<ReviewRow[]> {
     if (!ids.length) return [];
-    const placeholders = ids.map((_, i) => `$${i + 1}`).join(",");
+    const placeholders = ids.map(() => "?").join(",");
     const r = await this.db.query<ReviewRow>(`SELECT * FROM reviews WHERE asana_task_id IN (${placeholders})`, ids);
     return r.rows;
   }
@@ -222,8 +249,8 @@ export class ReviewRepo {
   /** Takes reviews out of the daily automated cycle (used after an on-demand historical check). */
   async setMonitoringActive(ids: number[], active: boolean): Promise<void> {
     if (!ids.length) return;
-    const placeholders = ids.map((_, i) => `$${i + 2}`).join(",");
-    await this.db.query(`UPDATE reviews SET monitoring_active = $1, updated_at = now() WHERE id IN (${placeholders})`, [active, ...ids]);
+    const placeholders = ids.map(() => "?").join(",");
+    await this.db.query(`UPDATE reviews SET monitoring_active = ?, updated_at = now() WHERE id IN (${placeholders})`, [active, ...ids]);
   }
 
   /** Every "<Month> Managed Disputes <Year>" project seen so far, for the dashboard's month picker. */
@@ -235,8 +262,8 @@ export class ReviewRepo {
   /** Records that a project exists, without touching its sync/run state if already known. */
   async noteAsanaProjectSeen(projectGid: string, displayName: string): Promise<void> {
     await this.db.query(
-      `INSERT INTO asana_month_projects (project_gid, display_name) VALUES ($1,$2)
-       ON CONFLICT (project_gid) DO UPDATE SET display_name = $2`,
+      `INSERT INTO asana_month_projects (project_gid, display_name) VALUES (?,?)
+       ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)`,
       [projectGid, displayName],
     );
   }
@@ -251,7 +278,7 @@ export class ReviewRepo {
     await this.noteAsanaProjectSeen(projectGid, displayName);
     const r = await this.db.query(
       `UPDATE asana_month_projects SET run_status='running', last_run_error=NULL, updated_at=now()
-       WHERE project_gid=$1 AND (run_status <> 'running' OR updated_at < now() - INTERVAL '${staleMinutes} minutes')`,
+       WHERE project_gid=? AND (run_status <> 'running' OR updated_at < DATE_SUB(NOW(), INTERVAL ${staleMinutes} MINUTE))`,
       [projectGid],
     );
     return (r.rowCount ?? 0) > 0;
@@ -274,14 +301,14 @@ export class ReviewRepo {
   async finishAsanaRun(projectGid: string, result: { ok: true; reviewCount: number } | { ok: false; error: string }): Promise<void> {
     if (result.ok) {
       await this.db.query(
-        `UPDATE asana_month_projects SET run_status='done', last_synced_at=now(), last_review_count=$2,
-           last_run_error=NULL, updated_at=now() WHERE project_gid=$1`,
-        [projectGid, result.reviewCount],
+        `UPDATE asana_month_projects SET run_status='done', last_synced_at=now(), last_review_count=?,
+           last_run_error=NULL, updated_at=now() WHERE project_gid=?`,
+        [result.reviewCount, projectGid],
       );
     } else {
       await this.db.query(
-        "UPDATE asana_month_projects SET run_status='failed', last_run_error=$2, updated_at=now() WHERE project_gid=$1",
-        [projectGid, result.error],
+        "UPDATE asana_month_projects SET run_status='failed', last_run_error=?, updated_at=now() WHERE project_gid=?",
+        [result.error, projectGid],
       );
     }
   }
@@ -298,8 +325,8 @@ export class ReviewRepo {
     for (const id of ids) {
       await this.db.query(
         `UPDATE reviews SET notification_sent=true, notification_sent_at=now(), last_notification_error=NULL,
-           monitoring_active=$2, updated_at=now() WHERE id=$1 AND notification_sent=false`,
-        [id, !stopChecking],
+           monitoring_active=?, updated_at=now() WHERE id=? AND notification_sent=false`,
+        [!stopChecking, id],
       );
     }
   }
@@ -307,9 +334,9 @@ export class ReviewRepo {
   async markNotificationFailed(ids: number[], error: string): Promise<void> {
     for (const id of ids) {
       await this.db.query(
-        `UPDATE reviews SET notification_attempts=notification_attempts+1, last_notification_error=$2,
-           updated_at=now() WHERE id=$1`,
-        [id, error],
+        `UPDATE reviews SET notification_attempts=notification_attempts+1, last_notification_error=?,
+           updated_at=now() WHERE id=?`,
+        [error, id],
       );
     }
   }

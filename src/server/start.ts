@@ -34,10 +34,11 @@ function buildPlaceReviewsLoader() {
   }
 }
 
-export async function startDashboard(repo: ReviewRepo) {
+/** Builds the dashboard Express app without binding a port — for mounting into another process's own server (see hub-server/apps-bridge.js). */
+export async function buildDashboardApp(repo: ReviewRepo) {
   const cleared = await repo.clearInterruptedRuns();
   if (cleared) logger.warn({ cleared }, "cleared runs left marked as running by a previous shutdown");
-  createApp({
+  return createApp({
     repo,
     user: config.dashboardUser,
     password: config.dashboardPassword,
@@ -45,5 +46,10 @@ export async function startDashboard(repo: ReviewRepo) {
     timezone: config.timezone,
     monthRunner: buildMonthRunner(),
     loadPlaceReviews: buildPlaceReviewsLoader(),
-  }).listen(config.port, () => logger.info({ port: config.port }, "dashboard listening"));
+  });
+}
+
+export async function startDashboard(repo: ReviewRepo) {
+  const app = await buildDashboardApp(repo);
+  app.listen(config.port, () => logger.info({ port: config.port }, "dashboard listening"));
 }
