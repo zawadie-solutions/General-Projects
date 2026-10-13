@@ -15,6 +15,8 @@ export interface WalkedTask {
   task: AsanaTask;
   /** Names from the root: [section, ancestor task, ..., this task] */
   path: string[];
+  /** Who each entry of `path` is assigned to in Asana (null for the section and for unassigned tasks). */
+  assignees: (string | null)[];
 }
 
 /** Runs `fn` over `items` with at most `limit` calls in flight at once. */
@@ -42,14 +44,15 @@ export async function walkProject(
   const concurrency = opts.concurrency ?? 8;
   const out: WalkedTask[] = [];
 
-  const expand = async (level: { task: AsanaTask; path: string[] }[], depth: number): Promise<void> => {
+  const who = (t: AsanaTask) => t.assignee?.name?.trim() || null;
+  const expand = async (level: WalkedTask[], depth: number): Promise<void> => {
     for (const item of level) out.push(item);
     opts.onProgress?.(out.length);
     if (depth >= s.maxDepth) return;
     const expandable = level.filter((t) => (t.task.num_subtasks ?? 0) > 0);
     if (!expandable.length) return;
-    const childLevels = await mapLimit(expandable, concurrency, async ({ task, path }) =>
-      (await client.subtasks(task.gid)).map((sub) => ({ task: sub, path: [...path, sub.name] })),
+    const childLevels = await mapLimit(expandable, concurrency, async ({ task, path, assignees }) =>
+      (await client.subtasks(task.gid)).map((sub) => ({ task: sub, path: [...path, sub.name], assignees: [...assignees, who(sub)] })),
     );
     await expand(childLevels.flat(), depth + 1);
   };
@@ -57,7 +60,7 @@ export async function walkProject(
   for (const section of await client.sections(s.projectGid)) {
     const tasks = await client.sectionTasks(section.gid);
     await expand(
-      tasks.map((task) => ({ task, path: [section.name, task.name] })),
+      tasks.map((task) => ({ task, path: [section.name, task.name], assignees: [null, who(task)] })),
       1,
     );
   }
@@ -66,11 +69,12 @@ export async function walkProject(
 
 /** Any task whose description holds a Google review link is a review task. */
 export function toDiscovered(w: WalkedTask, s: AsanaSettings): DiscoveredReview | null {
-  const { task, path } = w;
+  const { task, path, assignees } = w;
   if (!s.includeCompleted && task.completed) return null;
   const url = pickGoogleReviewUrl(task.notes, task.html_notes);
   if (!url) return null;
   const ancestors = path.slice(0, -1);
+  const locationAt = path[s.locationIndex] && s.locationIndex < path.length - 1 ? s.locationIndex : ancestors.length - 1;
   return {
     asanaTaskId: task.gid,
     asanaTaskName: task.name,
@@ -81,6 +85,8 @@ export function toDiscovered(w: WalkedTask, s: AsanaSettings): DiscoveredReview 
       path[s.locationIndex] && s.locationIndex < path.length - 1
         ? path[s.locationIndex]
         : (ancestors[ancestors.length - 1] ?? null),
+    assigneeName: assignees[assignees.length - 1] ?? null,
+    locationAssigneeName: (locationAt >= 0 ? assignees[locationAt] : null) ?? null,
     reviewerName: parseReviewerName(task.notes) ?? parseReviewerFromTitle(task.name) ?? (s.reviewerFromTitle ? task.name : null),
     rating: parseRating(task.notes),
     reviewText: parseReviewText(task.notes),

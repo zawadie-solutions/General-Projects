@@ -54,6 +54,7 @@ export const dashboardHtml = `<!doctype html>
   .btn.ghost:hover{background:var(--hover)}
   .btn.ghost:disabled{background:var(--bg);color:var(--muted)}
   .btn.busy,.btn.busy:disabled{background:var(--magenta-tint);border-color:var(--magenta-tint);color:var(--magenta-ink);cursor:progress}
+  .runactions .btn.ghost{font-size:14px;padding:9px 16px;border-radius:9px}
   .btn.ghost.busy,.btn.ghost.busy:disabled{background:var(--hover);border-color:var(--border);color:var(--text)}
   /* The page's one primary action: larger, with a soft magenta glow. */
   .btn.run{font-size:14px;padding:9px 20px 9px 16px;border-radius:9px;box-shadow:0 1px 2px rgba(229,26,90,.35),0 8px 18px -6px rgba(229,26,90,.55)}
@@ -146,10 +147,20 @@ export const dashboardHtml = `<!doctype html>
   .cardhead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
   .cardhead .title{font-weight:700;overflow-wrap:anywhere;min-width:0}
   .cardhead .actions{display:flex;gap:8px;flex-wrap:wrap}
+  .locworker{color:var(--muted);font-size:12.5px;margin-top:4px}
+  .locworker b{color:var(--text);font-weight:600}
+  .locworker:empty{display:none}
+  /* Removed disputes at the selected location. */
+  .locremoved{margin-top:14px}
+  .locremoved h3{font-size:13px;font-weight:600;margin:0 0 8px}
+  .locremoved.has{border:1px solid var(--red-line);background:var(--red-tint);border-radius:8px;padding:12px 14px}
+  .locremoved.has h3{color:var(--red)}
+  .locremoved .removed-list{margin-top:0}
+  .locremoved .none{color:var(--muted);font-size:12.5px}
   .locnote{color:var(--muted);font-size:12.5px;margin-top:8px}
   .locnote:empty{display:none}
   .tablewrap{overflow-x:auto;margin-top:12px}
-  table{border-collapse:collapse;width:100%;min-width:560px;font-size:13px}
+  table{border-collapse:collapse;width:100%;min-width:660px;font-size:13px}
   th{text-align:left;font-size:12px;font-weight:600;color:var(--muted);background:var(--bg);padding:8px 10px;white-space:nowrap;border-bottom:1px solid var(--border)}
   td{padding:10px;border-bottom:1px solid var(--border);vertical-align:top}
   tr:last-child td{border-bottom:0}
@@ -292,6 +303,7 @@ export const dashboardHtml = `<!doctype html>
         </div>
         <div class="runactions">
           <button class="btn ghost" id="cancelRun" type="button" hidden>Cancel</button>
+          <button class="btn ghost" id="syncNow" type="button" hidden title="Refresh this month's review tasks from Asana. Does not check Google.">Sync from Asana</button>
           <button class="btn run" id="runNow" type="button" hidden>Run now</button>
         </div>
       </div>
@@ -313,7 +325,9 @@ export const dashboardHtml = `<!doctype html>
               <div class="title" id="locTitle">Reviews by location</div>
               <div class="actions"><button class="btn" id="checkLocation" type="button" disabled>Check now</button><button class="btn ghost" id="loadGoogle" type="button" disabled>Load Google reviews</button></div>
             </div>
+            <div class="locworker" id="locWorker"></div>
             <div class="locnote" id="locationNote"></div>
+            <div id="locRemoved"></div>
             <div id="reviews"></div>
             <div id="googleReviews"></div>
           </div>
@@ -456,6 +470,7 @@ async function loadMonths(){
   availableMonths=await api('api/available-months');
   const bar=$('monthbar');
   $('runNow').hidden=!availableMonths.length;
+  $('syncNow').hidden=!availableMonths.length;
   if(!availableMonths.length){bar.classList.remove('show');monthRunning=false;runState=null;renderRun();$('monthNote').textContent='';return}
   bar.classList.add('show');
   if(!currentProject||!availableMonths.some(m=>m.projectGid===currentProject))currentProject=pickDefaultProject(availableMonths);
@@ -472,26 +487,38 @@ async function loadMonths(){
   const running=m&&m.runStatus==='running';
   monthRunning=!!running;
   btn.disabled=monthRunning;
-  if(!monthRunning){runState=null;cancelPending=false;clearTimeout(pollTimer);setBtn(btn,'Run now',false,PLAY)}
+  if(!monthRunning){runState=null;cancelPending=false;clearTimeout(pollTimer);setBtn(btn,'Run now',false,PLAY);$('syncNow').disabled=false;setBtn($('syncNow'),'Sync from Asana',false)}
   renderRun();
   if(monthRunning&&!runState)pollRun();
   $('monthNote').textContent=running?''
     :m&&m.lastRunError==='cancelled'?'Last run was cancelled before it finished.'
     :m&&m.lastRunError?'Last run failed: '+m.lastRunError
     :m&&m.lastSyncedAt?'Last synced '+dayLabel(m.lastSyncedAt)+', '+timeLabel(m.lastSyncedAt)
-    :'Never synced yet — click Run now.';
+    :'Never synced yet — click Sync from Asana to bring this month in, or Run now to sync and check it.';
 }
 
 /** Draws the run panel, the Run button's label and the Cancel button from monthRunning / runState. */
 function renderRun(){
   const running=monthRunning||!!runState;
   $('runStatus').hidden=!running;
-  $('cancelRun').hidden=!running;
+  // A sync cannot be stopped part-way (it is one read of Asana), so it has no Cancel.
+  const syncing=!!(runState&&runState.kind==='sync');
+  $('cancelRun').hidden=!running||syncing;
   if(!running)return;
-  const p=runState, btn=$('runNow'), cancel=$('cancelRun');
+  const p=runState, btn=$('runNow'), cancel=$('cancelRun'), sync=$('syncNow');
   const cancelling=cancelPending||!!(p&&p.cancelRequested);
   cancel.disabled=cancelling;setBtn(cancel,cancelling?'Cancelling…':'Cancel',cancelling);
-  btn.disabled=true;
+  // While either one is going, both buttons are off: a month has one job at a time.
+  btn.disabled=true;sync.disabled=true;
+  if(syncing){
+    $('runBar').classList.add('indet');
+    $('runText').textContent='Syncing this month from Asana…';
+    $('runCount').textContent='Not checking Google';
+    setBtn(sync,'Syncing…',true);
+    setBtn(btn,'Run now',false,PLAY);
+    return;
+  }
+  setBtn(sync,'Sync from Asana',false);
   if(p&&p.phase==='checking'&&p.reviewsTotal){
     const n=Math.min(p.doneLocations.length+1,p.totalLocations);
     $('runBar').classList.remove('indet');
@@ -525,6 +552,18 @@ async function pollRun(){
   else if(monthRunning)pollTimer=setTimeout(()=>refresh().catch(()=>{}),10000);
 }
 
+$('syncNow').onclick=async()=>{
+  if(!currentProject||monthRunning)return;
+  const m=availableMonths.find(x=>x.projectGid===currentProject);
+  const btn=$('syncNow');btn.disabled=true;$('runNow').disabled=true;setBtn(btn,'Starting…',true);
+  try{
+    const r=await fetch('api/sync-month',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectGid:currentProject,name:m&&m.name})});
+    const j=await r.json();
+    if(!j.started)$('monthNote').textContent='Could not start the sync: '+(j.reason||'unknown error');
+  }catch(e){$('monthNote').textContent='Failed to start the sync: '+e.message}
+  await loadMonths();
+};
+
 $('cancelRun').onclick=async()=>{
   if(!currentProject||cancelPending)return;
   cancelPending=true;renderRun();
@@ -539,7 +578,7 @@ $('cancelRun').onclick=async()=>{
 $('runNow').onclick=async()=>{
   if(!currentProject)return;
   const m=availableMonths.find(x=>x.projectGid===currentProject);
-  const btn=$('runNow');btn.disabled=true;setBtn(btn,'Starting…',true);
+  const btn=$('runNow');btn.disabled=true;$('syncNow').disabled=true;setBtn(btn,'Starting…',true);
   try{
     const r=await fetch('api/run-month',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectGid:currentProject,name:m&&m.name})});
     const j=await r.json();
@@ -587,6 +626,8 @@ async function loadSummary(){
   return s;
 }
 
+/** The person working on a dispute: its own Asana assignee, else whoever has the location. */
+const workedOnBy=r=>r.assignee_name||r.location_assignee_name||null;
 function notifTag(r){
   if(!r.notification_sent)return r.last_notification_error?['Failed, will retry','failed']:['Pending','pending'];
   return ['Notified '+dayLabel(r.notification_sent_at),'sent'];
@@ -606,7 +647,7 @@ async function loadStatus(){
   const list=el('ul',null,'removed-list');
   for(const r of rows){
     const li=document.createElement('li');
-    const left=el('div',null,'left');left.append(el('span',r.reviewer_name||'Unknown reviewer','who'),el('span',r.location||'Unknown location','where'));
+    const left=el('div',null,'left');left.append(el('span',r.reviewer_name||'Unknown reviewer','who'),el('span',(r.location||'Unknown location')+'  ·  '+(workedOnBy(r)?'Worked on by '+workedOnBy(r):'Nobody assigned in Asana'),'where'));
     const [tagText,tagCls]=notifTag(r);
     const right=el('div',null,'right');
     right.append(el('span','Removed '+dayLabel(r.removed_at),'when'), el('span',tagText,'tag '+tagCls));
@@ -745,20 +786,47 @@ $('loadGoogle').onclick=async()=>{
   if(currentLocation===location)box.replaceChildren(head);
 };
 
-function showReviewsError(e){$('reviews').replaceChildren(el('div','Failed to load reviews: '+e.message,'empty'))}
+function showReviewsError(e){$('locRemoved').replaceChildren();$('reviews').replaceChildren(el('div','Failed to load reviews: '+e.message,'empty'))}
 
 async function loadReviews(){
   const box=$('reviews');
   $('checkLocation').disabled=!currentLocation||checkingLocation;
   $('loadGoogle').disabled=!currentLocation||currentLocation===NO_LOCATION||loadingGoogle;
   $('locTitle').textContent=currentLocation?locName(currentLocation):'Reviews by location';
-  if(!currentLocation){box.replaceChildren(el('div','Choose a location on the left to see its reviews for this month.','empty'));return}
+  const worker=$('locWorker'), removedBox=$('locRemoved');
+  if(!currentLocation){worker.replaceChildren();removedBox.replaceChildren();box.replaceChildren(el('div','Choose a location on the left to see its reviews for this month.','empty'));return}
   const q=currentLocation===NO_LOCATION?'api/reviews':'api/reviews?location='+encodeURIComponent(currentLocation);
   const rows=await api(withProject(q));
-  if(!rows.length){box.replaceChildren(el('div','No reviews for this location.','empty'));return}
+  if(!rows.length){worker.replaceChildren();removedBox.replaceChildren();box.replaceChildren(el('div','No reviews for this location.','empty'));return}
+
+  // Who has this location in Asana (the location task's assignee).
+  const owner=(rows.find(r=>r.location_assignee_name)||{}).location_assignee_name;
+  if(owner)worker.replaceChildren(document.createTextNode('Worked on by '),el('b',owner),document.createTextNode(' (from Asana)'));
+  else worker.replaceChildren(document.createTextNode('Nobody is assigned to this location in Asana.'));
+
+  // Removed disputes at this location.
+  const gone=rows.filter(r=>r.status==='REVIEW_REMOVED');
+  const sec=el('div',null,'locremoved'+(gone.length?' has':''));
+  sec.append(el('h3',gone.length?gone.length+' removed dispute'+(gone.length>1?'s':''):'Removed disputes'));
+  if(!gone.length)sec.append(el('div','None of the disputed reviews at this location has been removed.','none'));
+  else{
+    const list=el('ul',null,'removed-list');
+    for(const r of gone){
+      const li=document.createElement('li');
+      const left=el('div',null,'left');
+      left.append(el('span',r.reviewer_name||'Unknown reviewer','who'),el('span',workedOnBy(r)?'Worked on by '+workedOnBy(r):'Nobody assigned in Asana','where'));
+      const [tagText,tagCls]=notifTag(r);
+      const right=el('div',null,'right');
+      right.append(el('span',r.removed_at?'Removed '+dayLabel(r.removed_at):'Removed','when'),el('span',tagText,'tag '+tagCls),logoLink('google',r.google_review_url),logoLink('asana',r.asana_task_url));
+      li.append(left,right);list.append(li);
+    }
+    sec.append(list);
+  }
+  removedBox.replaceChildren(sec);
+
   const table=document.createElement('table');
   const hr=document.createElement('tr');
-  for(const h of ['Reviewer','Status','Last checked','Links'])hr.append(el('th',h));
+  for(const h of ['Reviewer','Worked on by','Status','Last checked','Links'])hr.append(el('th',h));
   const thead=document.createElement('thead');thead.append(hr);
   const tbody=document.createElement('tbody');
   for(const r of rows){
@@ -766,6 +834,7 @@ async function loadReviews(){
     const who=document.createElement('td');
     who.append(el('div',r.reviewer_name||'Unknown reviewer','who'),el('div',r.asana_task_name+(r.rating?'  ·  '+r.rating+'★':''),'meta'));
     if(r.status==='UNKNOWN'&&r.last_error)who.append(el('div','Reason: '+r.last_error,'meta'));
+    const by=el('td',workedOnBy(r)||'—');if(!workedOnBy(r))by.title='Nobody is assigned in Asana';
     const [tagText,tagCls]=STATUS_TAG[r.status]||STATUS_TAG.UNKNOWN;
     const st=el('td',null,'nowrap');
     st.append(el('span',r.status==='UNKNOWN'&&r.last_checked_at?'Could not be checked':tagText,'tag '+tagCls));
@@ -773,7 +842,7 @@ async function loadReviews(){
     const when=el('td',r.last_checked_at?dayLabel(r.last_checked_at)+', '+timeLabel(r.last_checked_at):'Never','nowrap');
     const links=el('td',null,'nowrap');
     links.append(logoLink('google',r.google_review_url),logoLink('asana',r.asana_task_url));
-    tr.append(who,st,when,links);tbody.append(tr);
+    tr.append(who,by,st,when,links);tbody.append(tr);
   }
   table.append(thead,tbody);
   const wrap=el('div',null,'tablewrap');wrap.append(table);
@@ -799,7 +868,7 @@ async function loadActivity(){
 }
 
 // ---- Audit page ----
-const AUDIT_KIND={run:'Check',location:'Check',daily:'Daily',google:'Google',settings:'Settings',system:'System'};
+const AUDIT_KIND={run:'Check',sync:'Sync',location:'Check',daily:'Daily',google:'Google',settings:'Settings',system:'System'};
 let auditFilter='', auditOldest=null;
 function auditRow(e){
   const tr=document.createElement('tr');

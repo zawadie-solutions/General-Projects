@@ -1,12 +1,17 @@
-// Dashboard preview with fake data in an in-memory database. Does not touch the real DB or any API.
-import { newDb } from "pg-mem";
-import type { Db } from "../db/db";
+// Dashboard preview with fake data. It runs in its own throwaway database on the same MySQL
+// server (created now, dropped when the preview stops), so it never touches the real data or
+// any API. The MySQL account needs CREATE and DROP rights.
+import { config } from "../config";
 import { migrate } from "../db/db";
 import { ReviewRepo } from "../db/repo";
+import { createScratchDb } from "../db/scratch";
 import { createApp } from "../server/app";
 
-const { Pool } = newDb().adapters.createPg();
-const db = new Pool() as unknown as Db;
+const scratch = await createScratchDb(config.databaseUrl(), "grm_preview");
+const db = scratch.db;
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => void scratch.drop().finally(() => process.exit(0)));
+}
 await migrate(db);
 const repo = new ReviewRepo(db);
 
@@ -33,6 +38,9 @@ for (const [i, name] of people.entries()) {
     asanaProjectGid: projectGids[i % 2],
     location: locations[i % 3],
     month: months[i % 2],
+    // Each location has someone on it; a few disputes are assigned to someone else.
+    assigneeName: i % 4 === 1 ? "Priya Nair" : null,
+    locationAssigneeName: ["Daniel Okoro", "Lena Fischer", null][i % 3],
     reviewerName: name,
     rating: (i % 5) + 1,
     reviewText: texts[i],
@@ -52,7 +60,7 @@ await repo.markNotified([all[0].id], true); // first removal notified, second st
 const { rows: historyRows } = await db.query<{ id: number }>("SELECT id FROM review_check_history ORDER BY id");
 for (const [i, row] of historyRows.entries()) {
   const daysAgo = i % 3;
-  if (daysAgo > 0) await db.query(`UPDATE review_check_history SET checked_at = now() - INTERVAL '${daysAgo} days' WHERE id = $1`, [row.id]);
+  if (daysAgo > 0) await db.query(`UPDATE review_check_history SET checked_at = now(3) - INTERVAL ${daysAgo} DAY WHERE id = $1`, [row.id]);
 }
 
 // A few audit entries so the Audit page has something to show.

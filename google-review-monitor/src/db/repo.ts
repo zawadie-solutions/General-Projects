@@ -38,8 +38,8 @@ export class ReviewRepo {
     if (!row) {
       await this.db.query(
         `INSERT INTO reviews (asana_task_id, asana_task_name, asana_task_url, asana_project_gid, location, month,
-           reviewer_name, rating, review_text, google_review_url)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+           reviewer_name, rating, review_text, google_review_url, assignee_name, location_assignee_name)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [
           d.asanaTaskId,
           d.asanaTaskName,
@@ -51,6 +51,8 @@ export class ReviewRepo {
           d.rating,
           d.reviewText,
           d.googleReviewUrl,
+          d.assigneeName,
+          d.locationAssigneeName,
         ],
       );
       return true;
@@ -59,7 +61,7 @@ export class ReviewRepo {
     const urlChanged = row.google_review_url !== d.googleReviewUrl;
     await this.db.query(
       `UPDATE reviews SET asana_task_name=$2, asana_task_url=$3, asana_project_gid=$4, location=$5, month=$6, reviewer_name=$7,
-         rating=$8, google_review_url=$9, review_text=$10, updated_at=now()
+         rating=$8, google_review_url=$9, review_text=$10, assignee_name=$11, location_assignee_name=$12, updated_at=now(3)
          ${urlChanged ? ", status='UNKNOWN', removed_at=NULL, notification_sent=false, notification_sent_at=NULL, monitoring_active=true, last_error=NULL" : ""}
        WHERE id=$1`,
       [
@@ -73,6 +75,8 @@ export class ReviewRepo {
         d.rating,
         d.googleReviewUrl,
         d.reviewText,
+        d.assigneeName,
+        d.locationAssigneeName,
       ],
     );
     return false;
@@ -94,7 +98,7 @@ export class ReviewRepo {
     const proj = opts.projectGid ? `AND asana_project_gid = $${p.push(opts.projectGid)}` : "";
     const limit = opts.limit ?? 100;
     const r = await this.db.query<ReviewRow>(
-      `SELECT * FROM reviews WHERE status='REVIEW_REMOVED' ${proj} ORDER BY removed_at DESC NULLS LAST, id DESC LIMIT $${p.push(limit)}`,
+      `SELECT * FROM reviews WHERE status='REVIEW_REMOVED' ${proj} ORDER BY removed_at DESC, id DESC LIMIT $${p.push(limit)}`,
       p,
     );
     return r.rows;
@@ -114,7 +118,7 @@ export class ReviewRepo {
     const p: unknown[] = [];
     const where = projectGid ? `WHERE asana_project_gid = $${p.push(projectGid)}` : "";
     const r = await this.db.query<{ location: string | null; n: string }>(
-      `SELECT location, COUNT(*) AS n FROM reviews ${where} GROUP BY location ORDER BY location`,
+      `SELECT location, COUNT(*) AS n FROM reviews ${where} GROUP BY location ORDER BY location IS NULL, location`,
       p,
     );
     return r.rows.map((x) => ({ location: x.location, count: Number(x.n) }));
@@ -160,7 +164,7 @@ export class ReviewRepo {
     const r = await this.db.query<{ checked_at: Date; result: string; location: string | null; reviewer_name: string | null }>(
       `SELECT h.checked_at, h.result, r.location, r.reviewer_name
        FROM review_check_history h JOIN reviews r ON r.id = h.review_id
-       WHERE h.checked_at >= now() - INTERVAL '${days} days' ${proj}
+       WHERE h.checked_at >= now(3) - INTERVAL ${days} DAY ${proj}
        ORDER BY h.checked_at DESC`,
       p,
     );
@@ -199,24 +203,24 @@ export class ReviewRepo {
     ]);
     if (result.status === "REVIEW_EXISTS") {
       await this.db.query(
-        `UPDATE reviews SET status='REVIEW_EXISTS', last_checked_at=now(), last_error=NULL, removed_at=NULL,
-           notification_sent=false, notification_sent_at=NULL, monitoring_active=true, updated_at=now() WHERE id=$1`,
+        `UPDATE reviews SET status='REVIEW_EXISTS', last_checked_at=now(3), last_error=NULL, removed_at=NULL,
+           notification_sent=false, notification_sent_at=NULL, monitoring_active=true, updated_at=now(3) WHERE id=$1`,
         [review.id],
       );
     } else if (result.status === "REVIEW_REMOVED") {
       await this.db.query(
-        `UPDATE reviews SET status='REVIEW_REMOVED', last_checked_at=now(), last_error=NULL,
-           removed_at=COALESCE(removed_at, now()), updated_at=now() WHERE id=$1`,
+        `UPDATE reviews SET status='REVIEW_REMOVED', last_checked_at=now(3), last_error=NULL,
+           removed_at=COALESCE(removed_at, now(3)), updated_at=now(3) WHERE id=$1`,
         [review.id],
       );
     } else if (review.status === "REVIEW_REMOVED") {
-      await this.db.query("UPDATE reviews SET last_checked_at=now(), last_error=$2, updated_at=now() WHERE id=$1", [
+      await this.db.query("UPDATE reviews SET last_checked_at=now(3), last_error=$2, updated_at=now(3) WHERE id=$1", [
         review.id,
         reason,
       ]);
     } else {
       await this.db.query(
-        "UPDATE reviews SET status='UNKNOWN', last_checked_at=now(), last_error=$2, updated_at=now() WHERE id=$1",
+        "UPDATE reviews SET status='UNKNOWN', last_checked_at=now(3), last_error=$2, updated_at=now(3) WHERE id=$1",
         [review.id, reason],
       );
     }
@@ -233,7 +237,7 @@ export class ReviewRepo {
   async setMonitoringActive(ids: number[], active: boolean): Promise<void> {
     if (!ids.length) return;
     const placeholders = ids.map((_, i) => `$${i + 2}`).join(",");
-    await this.db.query(`UPDATE reviews SET monitoring_active = $1, updated_at = now() WHERE id IN (${placeholders})`, [active, ...ids]);
+    await this.db.query(`UPDATE reviews SET monitoring_active = $1, updated_at = now(3) WHERE id IN (${placeholders})`, [active, ...ids]);
   }
 
   /** Every "<Month> Managed Disputes <Year>" project seen so far, for the dashboard's month picker. */
@@ -246,7 +250,7 @@ export class ReviewRepo {
   async noteAsanaProjectSeen(projectGid: string, displayName: string): Promise<void> {
     await this.db.query(
       `INSERT INTO asana_month_projects (project_gid, display_name) VALUES ($1,$2)
-       ON CONFLICT (project_gid) DO UPDATE SET display_name = $2`,
+       ON DUPLICATE KEY UPDATE display_name = $2`,
       [projectGid, displayName],
     );
   }
@@ -260,8 +264,8 @@ export class ReviewRepo {
     if (!Number.isInteger(staleMinutes) || staleMinutes <= 0) throw new Error("staleMinutes must be a positive integer");
     await this.noteAsanaProjectSeen(projectGid, displayName);
     const r = await this.db.query(
-      `UPDATE asana_month_projects SET run_status='running', last_run_error=NULL, updated_at=now()
-       WHERE project_gid=$1 AND (run_status <> 'running' OR updated_at < now() - INTERVAL '${staleMinutes} minutes')`,
+      `UPDATE asana_month_projects SET run_status='running', last_run_error=NULL, updated_at=now(3)
+       WHERE project_gid=$1 AND (run_status <> 'running' OR updated_at < now(3) - INTERVAL ${staleMinutes} MINUTE)`,
       [projectGid],
     );
     return (r.rowCount ?? 0) > 0;
@@ -275,7 +279,7 @@ export class ReviewRepo {
   async clearInterruptedRuns(): Promise<number> {
     const r = await this.db.query(
       `UPDATE asana_month_projects SET run_status='failed',
-         last_run_error='interrupted: the app was restarted before the check finished', updated_at=now()
+         last_run_error='interrupted: the app was restarted before the check finished', updated_at=now(3)
        WHERE run_status='running'`,
     );
     return r.rowCount ?? 0;
@@ -284,13 +288,13 @@ export class ReviewRepo {
   async finishAsanaRun(projectGid: string, result: { ok: true; reviewCount: number } | { ok: false; error: string }): Promise<void> {
     if (result.ok) {
       await this.db.query(
-        `UPDATE asana_month_projects SET run_status='done', last_synced_at=now(), last_review_count=$2,
-           last_run_error=NULL, updated_at=now() WHERE project_gid=$1`,
+        `UPDATE asana_month_projects SET run_status='done', last_synced_at=now(3), last_review_count=$2,
+           last_run_error=NULL, updated_at=now(3) WHERE project_gid=$1`,
         [projectGid, result.reviewCount],
       );
     } else {
       await this.db.query(
-        "UPDATE asana_month_projects SET run_status='failed', last_run_error=$2, updated_at=now() WHERE project_gid=$1",
+        "UPDATE asana_month_projects SET run_status='failed', last_run_error=$2, updated_at=now(3) WHERE project_gid=$1",
         [projectGid, result.error],
       );
     }
@@ -320,15 +324,15 @@ export class ReviewRepo {
 
   /** Settings saved from the dashboard (key -> value); empty when none were ever changed. */
   async getSettings(): Promise<Record<string, string>> {
-    const r = await this.db.query<{ key: string; value: string }>("SELECT key, value FROM app_settings");
-    return Object.fromEntries(r.rows.map((x) => [x.key, x.value]));
+    const r = await this.db.query<{ name: string; value: string }>("SELECT name, value FROM app_settings");
+    return Object.fromEntries(r.rows.map((x) => [x.name, x.value]));
   }
 
   async saveSettings(values: Record<string, string>, actor: string): Promise<void> {
     for (const [key, value] of Object.entries(values)) {
       await this.db.query(
-        `INSERT INTO app_settings (key, value, updated_by) VALUES ($1,$2,$3)
-         ON CONFLICT (key) DO UPDATE SET value = $2, updated_by = $3, updated_at = now()`,
+        `INSERT INTO app_settings (name, value, updated_by) VALUES ($1,$2,$3)
+         ON DUPLICATE KEY UPDATE value = $2, updated_by = $3, updated_at = now(3)`,
         [key, value, actor],
       );
     }
@@ -350,8 +354,8 @@ export class ReviewRepo {
   async markNotified(ids: number[], stopChecking: boolean): Promise<void> {
     for (const id of ids) {
       await this.db.query(
-        `UPDATE reviews SET notification_sent=true, notification_sent_at=now(), last_notification_error=NULL,
-           monitoring_active=$2, updated_at=now() WHERE id=$1 AND notification_sent=false`,
+        `UPDATE reviews SET notification_sent=true, notification_sent_at=now(3), last_notification_error=NULL,
+           monitoring_active=$2, updated_at=now(3) WHERE id=$1 AND notification_sent=false`,
         [id, !stopChecking],
       );
     }
@@ -361,7 +365,7 @@ export class ReviewRepo {
     for (const id of ids) {
       await this.db.query(
         `UPDATE reviews SET notification_attempts=notification_attempts+1, last_notification_error=$2,
-           updated_at=now() WHERE id=$1`,
+           updated_at=now(3) WHERE id=$1`,
         [id, error],
       );
     }

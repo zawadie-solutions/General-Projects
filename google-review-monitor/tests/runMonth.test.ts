@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AsanaClient } from "../src/asana/client";
+import { syncAsana } from "../src/asana/sync";
 import { type RunProgress, runMonthCheck } from "../src/monitor/runMonth";
+import { buildRemovalMessage } from "../src/notify/message";
+import { workedOnBy } from "../src/types";
 import { fakeAsana, fakeChecker, fakeNotifier, makeRepo, settings } from "./helpers";
 
 const EXISTS = { status: "REVIEW_EXISTS" } as const;
@@ -65,5 +68,44 @@ describe("runMonthCheck progress and cancel", () => {
     expect(result).toMatchObject({ checked: 3, removed: 3, cancelled: false, notified: true });
     expect(notifier.send).toHaveBeenCalledTimes(1);
     expect((await repo.all()).every((r) => !r.monitoring_active)).toBe(true);
+  });
+});
+
+describe("who is working on a dispute (from Asana)", () => {
+  const people = fakeAsana([
+    {
+      month: "October",
+      location: "Location A",
+      assignee: "Lena Fischer",
+      reviews: [
+        { gid: "a1", name: "a1", notes: link(1), assignee: "Priya Nair" },
+        { gid: "a2", name: "a2", notes: link(2) },
+      ],
+    },
+    { month: "October", location: "Location B", reviews: [{ gid: "b1", name: "b1", notes: link(3) }] },
+  ]) as unknown as AsanaClient;
+
+  it("sync stores the dispute's assignee and the location's assignee, and a re-sync picks up a change", async () => {
+    const { repo } = await makeRepo();
+    await syncAsana(people, repo, settings);
+    const by = new Map((await repo.all()).map((r) => [r.asana_task_id, r]));
+    expect([by.get("a1")?.assignee_name, by.get("a1")?.location_assignee_name]).toEqual(["Priya Nair", "Lena Fischer"]);
+    expect([by.get("a2")?.assignee_name, by.get("a2")?.location_assignee_name]).toEqual([null, "Lena Fischer"]);
+    expect([by.get("b1")?.assignee_name, by.get("b1")?.location_assignee_name]).toEqual([null, null]);
+    expect([workedOnBy(by.get("a1")!), workedOnBy(by.get("a2")!), workedOnBy(by.get("b1")!)]).toEqual(["Priya Nair", "Lena Fischer", null]);
+
+    const reassigned = fakeAsana([{ month: "October", location: "Location A", assignee: "Omar Haddad", reviews: [{ gid: "a2", name: "a2", notes: link(2) }] }]) as unknown as AsanaClient;
+    await syncAsana(reassigned, repo, settings);
+    expect((await repo.all()).find((r) => r.asana_task_id === "a2")?.location_assignee_name).toBe("Omar Haddad");
+  });
+
+  it("the removal alert names who is working on each dispute", async () => {
+    const { repo } = await makeRepo();
+    await syncAsana(people, repo, settings);
+    const msg = buildRemovalMessage(await repo.all());
+    expect(msg.text).toContain("Worked on by: Priya Nair");
+    expect(msg.text).toContain("Worked on by: Lena Fischer");
+    expect(msg.text).toContain("Worked on by: nobody assigned in Asana");
+    expect(msg.html).toContain("<b>Worked on by:</b> Priya Nair");
   });
 });

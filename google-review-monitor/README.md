@@ -7,7 +7,7 @@ Asana -> Google URL -> checkReview() -> EXISTS: silent | UNKNOWN: log, retry tom
 ```
 
 ## Setup
-1. `npm install`, create a PostgreSQL database, copy `.env.example` to `.env` and fill it in (never commit `.env`). URL-encode special characters in the DB password (`#` -> `%23`) and quote the value.
+1. `npm install`, create an empty MySQL 8 database (`CREATE DATABASE google_review_monitor`), copy `.env.example` to `.env` and fill it in (never commit `.env`). `DATABASE_URL` is `mysql://user:password@host:3306/database`; URL-encode special characters in the password (`#` -> `%23`) and quote the value.
 2. `npm run migrate` creates the tables.
 3. `npm run discover` prints the Asana project tree and what it extracts. Adjust `ASANA_MONTH_INDEX` / `ASANA_LOCATION_INDEX` / `ASANA_MAX_DEPTH` until month and location are right. Any task whose description holds a Google Maps/review link is a review task; `Reviewer: Name` and `Rating: N` lines in the description are used when present.
 4. Copy `config/locations.example.json` to `config/locations.json` (Asana location name -> Business Profile `accounts/…/locations/…`).
@@ -35,6 +35,12 @@ Set `REVIEW_CHECKER=dataforseo` with `DATAFORSEO_LOGIN` / `DATAFORSEO_PASSWORD` 
 
 ## Audit and Configure pages
 The dashboard's **Audit** page lists who did what and when: checks started, finished, cancelled or failed, single-location checks, Google review loads, settings changes, and what the scheduler did (`audit_log` table, append-only). The **Configure** page changes, without a restart, the review source and its fallback, how many of the newest reviews are fetched per location for DataForSEO and Apify, DataForSEO's queue, and whether the automatic daily check runs. It also shows the live credit left with DataForSEO and Apify. A value saved there is stored in `app_settings` and overrides `.env` until **Reset to .env values** is pressed. Credentials are never editable there and stay in `.env`.
+
+## Database
+The app uses MySQL 8 (`mysql2`). Tables are created on startup. Text uses the `utf8mb4_0900_as_cs` collation, so names compare exactly, and times are stored as UTC.
+
+- **Tests:** `npm test` needs `TEST_DATABASE_URL` pointing at a MySQL server (`mysql://user:password@host:3306`). Each test creates its own database and drops it afterwards, so the account needs CREATE and DROP rights.
+- **Preview:** `npm run preview` also creates a throwaway database on the `DATABASE_URL` server and drops it when stopped with Ctrl+C.
 
 ## Layout
 `src/asana` sync · `src/google` checker (swap behind `ReviewChecker`) · `src/notify` Slack DM / email (swap behind `Notifier`) · `src/monitor/cycle.ts` the daily job · `src/db` schema + repo · `src/index.ts` scheduler

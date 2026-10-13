@@ -59,9 +59,16 @@ export interface ConfigStore {
   dailyCheckEnabled(): boolean;
 }
 
+/** Something running for a month in this process: a full check, or a sync from Asana only. */
+interface LiveRun {
+  kind: "check" | "sync";
+  progress: RunProgress | null;
+  cancelRequested: boolean;
+}
+
 /** Audit page filters -> the action prefixes they cover. */
 const AUDIT_FILTERS: Record<string, string[]> = {
-  checks: ["run.", "location.", "daily.", "google."],
+  checks: ["run.", "sync.", "location.", "daily.", "google."],
   settings: ["settings."],
   system: ["system."],
 };
@@ -207,13 +214,13 @@ export function createApp(opts: {
 
   // Runs live in this process, so their progress and cancel flags do too (lost on restart,
   // which is also when start.ts clears the 'running' marks they leave behind).
-  const liveRuns = new Map<string, { progress: RunProgress | null; cancelRequested: boolean }>();
+  const liveRuns = new Map<string, LiveRun>();
 
   app.get(
     "/api/run-progress",
     api(async (req) => {
       const run = liveRuns.get(projectGidParam(req) ?? "");
-      return run ? { running: true, cancelRequested: run.cancelRequested, ...run.progress } : { running: false };
+      return run ? { running: true, kind: run.kind, cancelRequested: run.cancelRequested, ...run.progress } : { running: false };
     }),
   );
 
@@ -250,7 +257,7 @@ export function createApp(opts: {
       const runner = opts.monthRunner;
       const actor = actorOf(req);
       const month = displayName.trim();
-      const live: { progress: RunProgress | null; cancelRequested: boolean } = { progress: null, cancelRequested: false };
+      const live: LiveRun = { kind: "check", progress: null, cancelRequested: false };
       liveRuns.set(projectGid, live);
       await audit(actor, "run.started", `Started a check of ${month}`);
       void (async () => {
@@ -289,6 +296,55 @@ export function createApp(opts: {
           logger.error({ err: (e as Error).message, projectGid }, "run-month failed");
           await opts.repo.finishAsanaRun(projectGid, { ok: false, error: (e as Error).message }).catch(() => {});
           await audit(actor, "run.failed", `Check of ${month} failed: ${(e as Error).message}`);
+        } finally {
+          liveRuns.delete(projectGid);
+        }
+      })();
+
+      return { started: true };
+    }),
+  );
+
+  // Sync only: refreshes one month's review tasks (links, names, who is working on them) from
+  // Asana, without checking anything against Google, so it costs nothing. It claims the month
+  // the same way a check does, so the two can never run for the same month at once.
+  app.post(
+    "/api/sync-month",
+    api(async (req) => {
+      if (!opts.monthRunner) return { started: false, reason: "not configured in this environment" };
+      const body = req.body as { projectGid?: string; name?: string };
+      if (!body?.projectGid) throw new Error("projectGid required");
+      const { projectGid } = body;
+      const month = (body.name ?? projectGid).trim();
+
+      const claimed = await opts.repo.tryStartAsanaRun(projectGid, body.name ?? projectGid);
+      if (!claimed) return { started: false, reason: "a check or sync is already running for this month" };
+
+      const runner = opts.monthRunner;
+      const actor = actorOf(req);
+      const live: LiveRun = { kind: "sync", progress: null, cancelRequested: false };
+      liveRuns.set(projectGid, live);
+      await audit(actor, "sync.started", `Started syncing ${month} from Asana`);
+      void (async () => {
+        try {
+          const result = await runMonthCheck({
+            projectGid,
+            client: runner.client,
+            asanaSettings: runner.asanaSettings,
+            repo: opts.repo,
+            checker: null, // sync only
+            notifier: null,
+            checkDelayMs: 0,
+            removalRecheckDelayMs: 0,
+            retireAfterRun: false,
+            onState: (p) => (live.progress = p),
+          });
+          await opts.repo.finishAsanaRun(projectGid, { ok: true, reviewCount: result.reviewsFound });
+          await audit(actor, "sync.finished", `Synced ${month} from Asana: ${plural(result.reviewsFound, "review")} across ${plural(result.tasksScanned, "task")} scanned`);
+        } catch (e) {
+          logger.error({ err: (e as Error).message, projectGid }, "sync-month failed");
+          await opts.repo.finishAsanaRun(projectGid, { ok: false, error: (e as Error).message }).catch(() => {});
+          await audit(actor, "sync.failed", `Sync of ${month} from Asana failed: ${(e as Error).message}`);
         } finally {
           liveRuns.delete(projectGid);
         }

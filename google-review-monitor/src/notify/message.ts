@@ -1,4 +1,4 @@
-import type { ReviewRow } from "../types";
+import { type ReviewRow, workedOnBy } from "../types";
 
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -16,6 +16,7 @@ export function buildRemovalMessage(rows: ReviewRow[]) {
       [
         `Location: ${r.location ?? "n/a"}`,
         `Reviewer: ${r.reviewer_name ?? "n/a"}`,
+        `Worked on by: ${workedOnBy(r) ?? "nobody assigned in Asana"}`,
         `Rating: ${stars(r)}`,
         `Asana task: ${r.asana_task_url}`,
         `Google review: ${r.google_review_url}`,
@@ -31,6 +32,7 @@ export function buildRemovalMessage(rows: ReviewRow[]) {
     .map(
       (r) => `<p><b>Location:</b> ${esc(r.location ?? "n/a")}<br>
 <b>Reviewer:</b> ${esc(r.reviewer_name ?? "n/a")}<br>
+<b>Worked on by:</b> ${esc(workedOnBy(r) ?? "nobody assigned in Asana")}<br>
 <b>Rating:</b> ${esc(stars(r))}<br>
 <a href="${esc(r.asana_task_url)}">Asana task</a> · <a href="${esc(r.google_review_url)}">Google review</a></p>`,
     )
