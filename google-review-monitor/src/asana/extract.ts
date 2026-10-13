@@ -51,20 +51,35 @@ export function pickGoogleReviewUrl(notes: string | null | undefined, htmlNotes?
   return [...candidates].sort((a, b) => score(b) - score(a))[0]; // stable: keeps description order on ties
 }
 
-// "Mike Andrews : https://maps.app.goo.gl/..." — the name sits before the link.
-const NAME_BEFORE_URL_RE = /^\s*([^:\n/]{2,80}?)\s*:\s*https?:\/\//im;
+// "Mike Andrews : https://maps.app.goo.gl/..." or "Mike Andrews - https://..." — the name sits before the link.
+const NAME_BEFORE_URL_RE = /^\s*([^:\n/]{2,80}?)\s*(?::|[-–](?=\s*https?:))\s*https?:\/\//im;
+
+/** A short line that reads as a person or business name, not a sentence of review text. */
+function looksLikeName(s: string): boolean {
+  return s.length >= 2 && s.length <= 60 && s.split(/\s+/).length <= 5 && !/[.!?]\s|[!?]$|https?:/i.test(s);
+}
 
 export function parseReviewerName(notes: string | null | undefined): string | null {
   const text = notes ?? "";
   const labelled = text.match(/^\s*(?:reviewer(?:\s*name)?|review\s*author|author)\s*[:\-–]\s*(.+?)\s*$/im);
   if (labelled) return labelled[1].trim();
   const beforeUrl = text.match(NAME_BEFORE_URL_RE);
-  return beforeUrl ? beforeUrl[1].trim() : null;
+  if (beforeUrl) return beforeUrl[1].trim();
+  // A description that is only the name, e.g. "Kelley Williams" or "Akshat Sharma -" above the link.
+  const lines = text
+    .split("\n")
+    .map((l) => l.replace(URL_RE, "").replace(/[\s:\-–]+$/, "").trim())
+    .filter(Boolean);
+  return lines.length === 1 && looksLikeName(lines[0]) ? lines[0] : null;
 }
 
-/** "Dispute 1: Google - Mike Andrews" -> "Mike Andrews"; null when the title has no " - Name" part. */
+/**
+ * "Dispute 1: Google - Mike Andrews", "Dispute 3 Google-Kimberly Dickson" and
+ * "Dispute 1: Google - Laura Lewis-Barr" -> the name after the first hyphen;
+ * null when nothing follows it ("Dispute 2", "Dispute 2 Google-").
+ */
 export function parseReviewerFromTitle(title: string | null | undefined): string | null {
-  const m = (title ?? "").match(/\s-\s+([^-]+?)\s*$/);
+  const m = (title ?? "").match(/^[^-–]*[-–]\s*(.+?)\s*$/);
   return m ? m[1].trim() : null;
 }
 

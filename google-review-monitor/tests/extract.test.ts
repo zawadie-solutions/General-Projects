@@ -33,6 +33,17 @@ describe("url extraction", () => {
     expect(parseReviewerName("https://maps.app.goo.gl/abc")).toBeNull();
     expect(parseReviewerFromTitle("Dispute 1: Google - Mike Andrews")).toBe("Mike Andrews");
     expect(parseReviewerFromTitle("Dispute 2")).toBeNull();
+    // no space after the hyphen, hyphenated names, and a title that stops at the hyphen
+    expect(parseReviewerFromTitle("Dispute 3: Google-Kimberly Dickson")).toBe("Kimberly Dickson");
+    expect(parseReviewerFromTitle("Dispute 4: Google -michelo eisel")).toBe("michelo eisel");
+    expect(parseReviewerFromTitle("Dispute 1: Google - Laura Lewis-Barr")).toBe("Laura Lewis-Barr");
+    expect(parseReviewerFromTitle("Dispute 2 Google-")).toBeNull();
+    // a description that holds only the name
+    expect(parseReviewerName("Kelley Williams\nhttps://maps.app.goo.gl/abc")).toBe("Kelley Williams");
+    expect(parseReviewerName("Akshat Sharma- https://maps.app.goo.gl/abc")).toBe("Akshat Sharma");
+    expect(parseReviewerName("Administrator -\nhttps://maps.app.goo.gl/abc")).toBe("Administrator");
+    expect(parseReviewerName("Terrible service. Would not recommend!\nhttps://maps.app.goo.gl/abc")).toBeNull();
+    expect(parseReviewerName("First line\nSecond line\nhttps://maps.app.goo.gl/abc")).toBeNull();
     expect(parseReviewText("Mike Andrews : https://maps.app.goo.gl/abc")).toBeNull();
   });
   it("extracts review text", () => {

@@ -328,7 +328,7 @@ describe("asana_month_projects run tracking (for the dashboard's Run now button)
   it("a stuck 'running' row older than staleMinutes is reclaimed", async () => {
     const { repo, db } = await makeRepo();
     await repo.tryStartAsanaRun("p1", "October 2026");
-    await db.query("UPDATE asana_month_projects SET updated_at = now() - INTERVAL '1 hour' WHERE project_gid = 'p1'");
+    await db.query("UPDATE asana_month_projects SET updated_at = now(3) - INTERVAL 1 HOUR WHERE project_gid = 'p1'");
 
     expect(await repo.tryStartAsanaRun("p1", "October 2026", 20)).toBe(true); // 1h > 20min stale threshold
   });

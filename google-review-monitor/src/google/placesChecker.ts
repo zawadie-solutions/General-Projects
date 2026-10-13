@@ -71,6 +71,20 @@ export function parseReviewLink(url: string): { reviewId: string; cid: string } 
   return { reviewId: decodeURIComponent(m[1]), cid: BigInt(`0x${m[2]}`).toString() };
 }
 
+/** Short links (maps.app.goo.gl) redirect to the long form that holds the IDs; null if none is reached. */
+export async function resolveReviewLink(url: string, fetchImpl: typeof fetch = fetch) {
+  let current = url;
+  for (let hop = 0; hop < 4; hop++) {
+    const parsed = parseReviewLink(current);
+    if (parsed) return parsed;
+    const res = await fetchImpl(current, { redirect: "manual" });
+    const next = res.headers.get("location");
+    if (!next) return null;
+    current = new URL(next, current).href;
+  }
+  return parseReviewLink(current);
+}
+
 /** "A & B Lawn and Garden Managed Reputation Lite (5)" -> "A & B Lawn and Garden". */
 export function businessNameFromLocation(location: string): string {
   return location.replace(/\s+Managed\s+(?:Reputation|Disputes)\b.*$/i, "").trim();
@@ -95,7 +109,7 @@ export class PlacesChecker implements ReviewChecker {
   private async decide(review: ReviewToCheck): Promise<CheckResult> {
     if (!isGoogleReviewUrl(review.googleReviewUrl)) return unknown("invalid or non-Google review URL");
     if (!review.location) return unknown("review has no location");
-    const link = await this.resolveLink(review.googleReviewUrl);
+    const link = await resolveReviewLink(review.googleReviewUrl, this.opts.fetchImpl);
     logger.info({ url: review.googleReviewUrl, link }, "places: review link resolved");
     if (!link) return unknown("review link does not identify a review and place");
 
@@ -109,21 +123,6 @@ export class PlacesChecker implements ReviewChecker {
     if (returned === 0 && listing.total > 0) return unknown(`Places API returned no reviews for this place (${listing.total} on Google)`);
     if (returned < listing.total) return unknown(`not among the ${returned} of ${listing.total} reviews the Places API returns`);
     return { status: "REVIEW_REMOVED" };
-  }
-
-  /** Short links (maps.app.goo.gl) redirect to the long form that holds the IDs. */
-  private async resolveLink(url: string) {
-    const f = this.opts.fetchImpl ?? fetch;
-    let current = url;
-    for (let hop = 0; hop < 4; hop++) {
-      const parsed = parseReviewLink(current);
-      if (parsed) return parsed;
-      const res = await f(current, { redirect: "manual" });
-      const next = res.headers.get("location");
-      if (!next) return null;
-      current = new URL(next, current).href;
-    }
-    return parseReviewLink(current);
   }
 
   private async listing(businessName: string, cid: string): Promise<PlaceListing | null> {
@@ -172,7 +171,7 @@ export class PlacesChecker implements ReviewChecker {
   async placeReviews(location: string, reviewUrls: string[]): Promise<PlaceReviews | null> {
     let cid: string | null = null;
     for (const url of reviewUrls) {
-      const link = isGoogleReviewUrl(url) ? await this.resolveLink(url).catch(() => null) : null;
+      const link = isGoogleReviewUrl(url) ? await resolveReviewLink(url, this.opts.fetchImpl).catch(() => null) : null;
       if (link) {
         cid = link.cid;
         break;

@@ -20,6 +20,11 @@ export interface ReviewToCheck {
  */
 export interface ReviewChecker {
   checkReview(review: ReviewToCheck): Promise<CheckResult>;
+  /**
+   * Optional: told which reviews are about to be checked, so a queue-based source can request
+   * every place up front. Must not throw; `checkReview` has to work without it.
+   */
+  prepare?(reviews: ReviewToCheck[]): Promise<void>;
 }
 
 /** A review task discovered in Asana. */
@@ -30,6 +35,10 @@ export interface DiscoveredReview {
   asanaProjectGid: string;
   location: string | null;
   month: string | null;
+  /** Who the dispute task itself is assigned to in Asana. */
+  assigneeName: string | null;
+  /** Who the location's task is assigned to in Asana. */
+  locationAssigneeName: string | null;
   reviewerName: string | null;
   rating: number | null;
   reviewText: string | null;
@@ -60,7 +69,14 @@ export interface ReviewRow {
   monitoring_active: boolean;
   created_at: Date;
   updated_at: Date;
+  /** Who the dispute task is assigned to in Asana (null if nobody). */
+  assignee_name: string | null;
+  /** Who the location's task is assigned to in Asana (null if nobody). */
+  location_assignee_name: string | null;
 }
+
+/** The person working on a dispute: its own assignee, else whoever has the location. */
+export const workedOnBy = (r: Pick<ReviewRow, "assignee_name" | "location_assignee_name">): string | null => r.assignee_name || r.location_assignee_name || null;
 
 export interface Notifier {
   send(message: { subject: string; text: string; html: string }): Promise<void>;
